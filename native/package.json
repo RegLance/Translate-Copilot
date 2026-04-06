@@ -1,0 +1,9 @@
+{
+  "name": "hover-translator-native",
+  "version": "1.0.0",
+  "description": "Native text selection service for hover-translator",
+  "main": "selection-service.js",
+  "dependencies": {
+    "selection-hook": "^1.0.0"
+  }
+}

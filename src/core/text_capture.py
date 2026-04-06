@@ -1,0 +1,253 @@
+"""文本捕获模块 - 使用 selection-hook 进行跨应用文本选择捕获"""
+import sys
+import os
+import json
+import time
+import subprocess
+import threading
+from typing import Optional, Tuple
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class SelectionInfo:
+    """选择信息"""
+    text: str
+    bounds: Optional[Tuple[int, int, int, int]] = None  # (x, y, width, height)
+    method: str = "selection-hook"  # 捕获方法
+    error: Optional[str] = None
+
+
+class TextCapture:
+    """文本捕获类 - 使用 selection-hook Node.js 服务"""
+
+    def __init__(self):
+        """初始化文本捕获"""
+        self._process: Optional[subprocess.Popen] = None
+        self._reader_thread: Optional[threading.Thread] = None
+        self._last_selection: Optional[dict] = None
+        self._last_capture_time: float = 0
+        self._lock = threading.Lock()
+        self._running = False
+        self._ready = False
+        self._node_path: Optional[str] = None
+
+        # 查找 Node.js 路径
+        self._find_node()
+
+        # 启动服务
+        self._start_service()
+
+    def _find_node(self):
+        """查找 Node.js 可执行文件路径"""
+        # Windows 上查找 node.exe
+        if sys.platform == 'win32':
+            # 尝试常见路径
+            common_paths = [
+                "node",  # PATH 中
+                r"C:\Program Files\nodejs\node.exe",
+                r"C:\Program Files (x86)\nodejs\node.exe",
+            ]
+
+            # 检查 PATH 环境变量
+            path_env = os.environ.get('PATH', '').split(os.pathsep)
+            for p in path_env:
+                node_exe = os.path.join(p, 'node.exe')
+                if os.path.isfile(node_exe):
+                    self._node_path = node_exe
+                    return
+
+            # 尝试直接使用 node（在 PATH 中）
+            self._node_path = "node"
+        else:
+            self._node_path = "node"
+
+    def _get_service_path(self) -> str:
+        """获取 selection-service.js 的路径"""
+        # 相对于当前文件的路径
+        current_dir = Path(__file__).parent
+        project_root = current_dir.parent.parent  # src/core -> src -> hover-translator
+        service_path = project_root / "native" / "selection-service.js"
+        return str(service_path)
+
+    def _start_service(self):
+        """启动 Node.js 选择监控服务"""
+        if self._process is not None:
+            return
+
+        service_path = self._get_service_path()
+        if not os.path.exists(service_path):
+            print(f"错误: selection-service.js 不存在: {service_path}", file=sys.stderr)
+            return
+
+        try:
+            # 启动 Node.js 子进程
+            self._process = subprocess.Popen(
+                [self._node_path, service_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+                text=True,
+                encoding='utf-8',
+                errors='replace'
+            )
+
+            self._running = True
+
+            # 启动读取线程
+            self._reader_thread = threading.Thread(target=self._read_output, daemon=True)
+            self._reader_thread.start()
+
+            # 等待就绪信号
+            timeout = 5.0
+            start_time = time.time()
+            while not self._ready and time.time() - start_time < timeout:
+                time.sleep(0.1)
+
+            if self._ready:
+                print("[TextCapture] selection-hook 服务已启动", file=sys.stderr)
+            else:
+                print("[TextCapture] 警告: selection-hook 服务启动超时", file=sys.stderr)
+
+        except Exception as e:
+            print(f"[TextCapture] 启动服务失败: {e}", file=sys.stderr)
+            self._process = None
+            self._running = False
+
+    def _read_output(self):
+        """读取 Node.js 进程的输出（在后台线程运行）"""
+        if not self._process or not self._process.stdout:
+            return
+
+        try:
+            while self._running:
+                line = self._process.stdout.readline()
+                if not line:
+                    break
+
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    data = json.loads(line)
+
+                    # 检查就绪信号
+                    if data.get('ready'):
+                        self._ready = True
+                        continue
+
+                    # 检查错误
+                    if data.get('error'):
+                        print(f"[TextCapture] 服务错误: {data['error']}", file=sys.stderr)
+                        continue
+
+                    # 存储选择数据
+                    with self._lock:
+                        self._last_selection = data
+                        self._last_capture_time = time.time()
+
+                except json.JSONDecodeError:
+                    # 忽略非 JSON 输出
+                    pass
+
+        except Exception as e:
+            if self._running:
+                print(f"[TextCapture] 读取输出错误: {e}", file=sys.stderr)
+
+    def capture(self) -> SelectionInfo:
+        """捕获当前选中的文本"""
+        with self._lock:
+            if self._last_selection:
+                data = self._last_selection
+                text = data.get('text', '')
+                x = data.get('x', 0)
+                y = data.get('y', 0)
+
+                return SelectionInfo(
+                    text=text,
+                    bounds=(x, y, 0, 0) if x or y else None,
+                    method="selection-hook"
+                )
+
+        return SelectionInfo(text="", method="selection-hook")
+
+    def capture_direct(self) -> str:
+        """直接捕获文本（简化版本，用于主流程）"""
+        with self._lock:
+            if self._last_selection:
+                return self._last_selection.get('text', '')
+        return ""
+
+    def clear_selection(self):
+        """清除缓存的选中内容（在翻译完成后调用）"""
+        with self._lock:
+            self._last_selection = None
+
+    def has_new_selection(self, since_time: float) -> bool:
+        """检查是否有新的选择（自指定时间以来）"""
+        with self._lock:
+            return self._last_capture_time > since_time
+
+    def get_last_capture_time(self) -> float:
+        """获取最后一次捕获的时间"""
+        with self._lock:
+            return self._last_capture_time
+
+    def is_ready(self) -> bool:
+        """检查服务是否就绪"""
+        return self._ready
+
+    def cleanup(self):
+        """清理资源"""
+        self._running = False
+
+        if self._process:
+            try:
+                self._process.terminate()
+                self._process.wait(timeout=2.0)
+            except Exception:
+                try:
+                    self._process.kill()
+                except Exception:
+                    pass
+            self._process = None
+
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=1.0)
+
+        self._ready = False
+        print("[TextCapture] 服务已停止", file=sys.stderr)
+
+    def __del__(self):
+        """析构函数"""
+        self.cleanup()
+
+
+# 全局文本捕获实例
+_capture_instance: Optional[TextCapture] = None
+
+
+def get_text_capture() -> TextCapture:
+    """获取全局文本捕获实例"""
+    global _capture_instance
+    if _capture_instance is None:
+        _capture_instance = TextCapture()
+    return _capture_instance
+
+
+def capture_selection() -> SelectionInfo:
+    """快捷函数：捕获当前选择"""
+    return get_text_capture().capture()
+
+
+def capture_text_direct() -> str:
+    """快捷函数：直接捕获文本"""
+    return get_text_capture().capture_direct()
+
+
+def clear_text_capture():
+    """快捷函数：清除缓存"""
+    get_text_capture().clear_selection()

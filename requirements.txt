@@ -1,0 +1,19 @@
+# 桌面划词翻译助手依赖清单
+
+# GUI 框架
+PyQt6>=6.4.0
+
+# 鼠标事件监听
+pynput>=1.7.0
+
+# 剪贴板操作
+pyperclip>=1.8.0
+
+# OpenAI API
+openai>=1.0.0
+
+# Windows COM/UI Automation (Windows only)
+comtypes>=1.2.0
+
+# 配置文件解析
+PyYAML>=6.0

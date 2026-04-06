@@ -1,0 +1,24 @@
+# 桌面划词翻译助手配置文件
+
+# 翻译服务配置（阿里云百炼）
+translator:
+  api_key: "sk-sp-019798d32d054d35b0841a6b7e2c1fd1"
+  model: "qwen3-coder-plus"  # 千问代码模型（支持 coding plan）
+  base_url: "https://coding.dashscope.aliyuncs.com/v1"
+  timeout: 15
+
+# 鼠标悬停触发配置
+hover:
+  delay_ms: 300      # 悬停触发延迟（毫秒）
+  area_padding: 15   # 选择区域扩展范围（像素）
+
+# 悬浮窗配置
+popup:
+  max_width: 450
+  max_height: 350
+  font_size: 14
+  opacity: 0.95
+  auto_close_delay: 5000  # 自动关闭延迟（毫秒）
+
+# 翻译目标语言
+target_language: "中文"

@@ -528,28 +528,6 @@ class SettingsDialog(QDialog):
             }}
         """
 
-    def _create_check_icon(self) -> QIcon:
-        """创建勾选图标"""
-        pixmap = QPixmap(18, 18)
-        pixmap.fill(QColor(0, 0, 0, 0))
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # 绘制蓝色圆角背景
-        painter.setBrush(QColor(self._theme['accent_color']))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(0, 0, 18, 18, 4, 4)
-
-        # 绘制白色勾选符号 ✓
-        painter.setPen(QPen(QColor(255, 255, 255), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        painter.drawLine(4, 9, 7, 14)  # 左下到中下
-        painter.drawLine(7, 14, 14, 5)  # 中下到右上
-
-        painter.end()
-
-        return QIcon(pixmap)
-
     def _apply_theme(self):
         """应用主题样式"""
         # 内容容器

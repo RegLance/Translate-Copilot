@@ -54,11 +54,9 @@ class Config:
                 print("配置文件验证失败，尝试从备份恢复", file=sys.stderr)
                 self._restore_from_backup()
         else:
-            # 尝试从旧位置迁移
-            self._migrate_from_old_location()
-            if not self._config_path.exists():
-                self._config = self._get_default_config()
-                self.save()
+            # 使用默认配置
+            self._config = self._get_default_config()
+            self.save()
 
     def _validate_config(self, config: Dict[str, Any]) -> bool:
         """验证配置是否有效"""
@@ -95,22 +93,6 @@ class Config:
         print("使用默认配置", file=sys.stderr)
         self._config = self._get_default_config()
         self.save()
-
-    def _migrate_from_old_location(self):
-        """从旧位置迁移配置"""
-        src_dir = Path(__file__).parent
-        project_dir = src_dir.parent
-        old_config = project_dir / "config.yaml"
-
-        if old_config.exists():
-            try:
-                import shutil
-                shutil.copy(str(old_config), str(self._config_path))
-                print(f"已迁移配置文件到: {self._config_path}", file=sys.stderr)
-                self._config = self._load_config(str(self._config_path))
-            except Exception as e:
-                print(f"迁移配置文件失败: {e}", file=sys.stderr)
-                self._config = self._get_default_config()
 
     def _load_config(self, path: str) -> Dict[str, Any]:
         """加载配置文件"""

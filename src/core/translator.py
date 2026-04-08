@@ -112,12 +112,6 @@ class Translator:
         """获取最后的错误信息"""
         return self._last_error
 
-        self._client = OpenAI(
-            api_key=api_key,
-            base_url=config.get('translator.base_url', 'https://api.openai.com/v1'),
-            timeout=config.get('translator.timeout', 60),
-        )
-
     def _get_cache_key(self, text: str, target_language: str, source_language: str = None) -> str:
         """生成缓存键"""
         return hashlib.md5(f"{text}:{source_language}:{target_language}".encode()).hexdigest()

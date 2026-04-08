@@ -183,6 +183,15 @@ class TranslatorWindow(QWidget):
         # 开启鼠标追踪
         self.setMouseTracking(True)
 
+        # 设置窗口图标（任务栏图标）
+        self._set_window_icon()
+
+    def _set_window_icon(self):
+        """设置窗口图标（任务栏图标）"""
+        icon_path = Path(__file__).parent.parent.parent / "assets" / "icon.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+
     def _setup_ui(self):
         """设置 UI"""
         theme = get_theme(self._theme_style)
@@ -1123,6 +1132,20 @@ class TranslatorWindow(QWidget):
 
         self.setCursor(QCursor(cursor_shape))
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        """鼠标双击事件 - 双击标题栏切换最大化状态"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position().toPoint()
+            title_bar_height = 28
+
+            # 检查是否在标题栏区域且不在按钮区域
+            if pos.y() <= title_bar_height and not self._is_over_title_bar_buttons(pos):
+                # 双击标题栏任意位置切换最大化
+                self._on_maximize()
+                return
+
+        super().mouseDoubleClickEvent(event)
+
     def mousePressEvent(self, event: QMouseEvent):
         """鼠标按下事件"""
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1182,15 +1205,11 @@ class TranslatorWindow(QWidget):
             self.setGeometry(new_x, new_y, new_w, new_h)
         else:
             # 智能光标控制
-            title_bar_height = 28
             # 1. 首先检查边框调整区域
             edge = self._get_resize_edge(pos)
             if edge:
                 self._update_cursor_for_edge(edge)
-            # 2. 检查是否在标题栏非按钮区域（显示拖动光标）
-            elif pos.y() <= title_bar_height and not self._is_over_title_bar_buttons(pos):
-                self.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
-            # 3. 其他区域显示默认箭头光标
+            # 2. 其他区域显示默认箭头光标（标题栏不显示拖动光标）
             else:
                 self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
 
@@ -1218,23 +1237,21 @@ class TranslatorWindow(QWidget):
         if event.type() == event.Type.MouseMove:
             # 获取鼠标在主窗口中的位置
             pos = self.mapFromGlobal(obj.mapToGlobal(event.position().toPoint()))
-            
+
             # 更新光标样式
             edge = self._get_resize_edge(pos)
             if edge:
                 self._update_cursor_for_edge(edge)
                 obj.setCursor(QCursor(self._get_cursor_shape_for_edge(edge)))
-            elif pos.y() <= 28 and not self._is_over_title_bar_buttons(pos):
-                self.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
-                obj.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
             else:
+                # 其他区域显示默认箭头光标（标题栏不显示拖动光标）
                 self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
                 obj.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
-        
+
         elif event.type() == event.Type.Leave:
             self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
             obj.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
-        
+
         return super().eventFilter(obj, event)
 
     def _get_cursor_shape_for_edge(self, edge: Optional[str]) -> Qt.CursorShape:

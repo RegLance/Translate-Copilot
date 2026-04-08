@@ -134,10 +134,10 @@ class PopupWindow(QWidget):
 
     def _setup_window_properties(self):
         """设置窗口属性"""
+        # 注意：移除 Tool 标志以便窗口显示在任务栏
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.WindowStaysOnTopHint
         )
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -147,6 +147,9 @@ class PopupWindow(QWidget):
         self.resize(self._default_width, self._default_height)
 
         self.setMouseTracking(True)
+
+        # 设置窗口图标（任务栏图标）
+        self._set_window_icon()
 
     def _setup_ui(self):
         """设置 UI 组件"""
@@ -672,8 +675,10 @@ class PopupWindow(QWidget):
         """)
 
     def _on_minimize(self):
-        """最小化窗口"""
+        """最小化窗口到任务栏"""
+        # 由于已移除 Tool 标志，窗口会显示在任务栏，可以使用 showMinimized()
         self.showMinimized()
+        log_debug("PopupWindow 已最小化到任务栏")
 
     def _on_maximize(self):
         """最大化/还原窗口"""
@@ -766,6 +771,13 @@ class PopupWindow(QWidget):
         # 每次显示时重新加载主题和字体配置
         self.update_theme()
 
+        # 如果窗口处于最小化状态，先恢复正常状态
+        if self.isMinimized():
+            self.showNormal()
+            # 重置最大化状态
+            self._is_maximized = False
+            self._maximize_btn.setText("□")
+
         self.resize(self._default_width, self._default_height)
 
         # 重置分割器比例
@@ -775,6 +787,7 @@ class PopupWindow(QWidget):
         self.move(x, y)
         self.show()
         self.raise_()
+        self.activateWindow()
 
         log_debug(f"PopupWindow 显示在 ({x}, {y})")
 
@@ -1064,6 +1077,19 @@ class PopupWindow(QWidget):
 
         self.setCursor(QCursor(cursor_shape))
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        """鼠标双击事件 - 双击标题栏切换最大化状态"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position().toPoint()
+
+            # 检查是否在标题栏区域且不在按钮区域
+            if self._title_bar.geometry().contains(pos) and not self._is_over_title_bar_buttons(pos):
+                # 双击标题栏任意位置切换最大化
+                self._on_maximize()
+                return
+
+        super().mouseDoubleClickEvent(event)
+
     def mousePressEvent(self, event: QMouseEvent):
         """鼠标按下事件"""
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1133,10 +1159,7 @@ class PopupWindow(QWidget):
             edge = self._get_resize_edge(pos)
             if edge:
                 self._update_cursor_for_edge(edge)
-            # 2. 检查是否在标题栏非按钮区域（显示拖动光标）
-            elif self._title_bar.geometry().contains(pos) and not self._is_over_title_bar_buttons(pos):
-                self.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
-            # 3. 其他区域显示默认箭头光标
+            # 2. 其他区域显示默认箭头光标（标题栏不显示拖动光标）
             else:
                 self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
 
@@ -1174,23 +1197,21 @@ class PopupWindow(QWidget):
         if event.type() == event.Type.MouseMove:
             # 获取鼠标在主窗口中的位置
             pos = self.mapFromGlobal(obj.mapToGlobal(event.position().toPoint()))
-            
+
             # 更新光标样式
             edge = self._get_resize_edge(pos)
             if edge:
                 self._update_cursor_for_edge(edge)
                 obj.setCursor(QCursor(self._get_cursor_shape_for_edge(edge)))
-            elif self._title_bar.geometry().contains(pos) and not self._is_over_title_bar_buttons(pos):
-                self.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
-                obj.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
             else:
+                # 其他区域显示默认箭头光标（标题栏不显示拖动光标）
                 self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
                 obj.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
-        
+
         elif event.type() == event.Type.Leave:
             self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
             obj.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
-        
+
         return super().eventFilter(obj, event)
 
     def _get_cursor_shape_for_edge(self, edge: Optional[str]) -> Qt.CursorShape:

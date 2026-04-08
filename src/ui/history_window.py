@@ -62,6 +62,15 @@ class HistoryWindow(QWidget):
         # 开启鼠标追踪
         self.setMouseTracking(True)
 
+        # 设置窗口图标（任务栏图标）
+        self._set_window_icon()
+
+    def _set_window_icon(self):
+        """设置窗口图标（任务栏图标）"""
+        icon_path = Path(__file__).parent.parent.parent / "assets" / "icon.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+
         self._history = get_history()
         self._setup_ui()
         self._load_history()
@@ -1019,6 +1028,15 @@ class HistoryWindow(QWidget):
         self.raise_()
         self.activateWindow()
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        """鼠标双击事件 - 双击标题栏切换最大化状态"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position().toPoint()
+            if self._title_bar.geometry().contains(pos) and not self._is_over_title_bar_buttons(pos):
+                self._on_maximize()
+                return
+        super().mouseDoubleClickEvent(event)
+
     def mousePressEvent(self, event: QMouseEvent):
         """鼠标按下事件"""
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1082,10 +1100,7 @@ class HistoryWindow(QWidget):
             edge = self._get_resize_edge(pos)
             if edge:
                 self._update_cursor_for_edge(edge)
-            # 2. 检查是否在标题栏非按钮区域（显示拖动光标）
-            elif pos.y() <= title_bar_height and not self._is_over_title_bar_buttons(pos):
-                self.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
-            # 3. 其他区域显示默认箭头光标
+            # 2. 其他区域显示默认箭头光标
             else:
                 self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
 
@@ -1119,9 +1134,6 @@ class HistoryWindow(QWidget):
                 self._update_cursor_for_edge(edge)
                 # 同时设置子控件的光标
                 obj.setCursor(QCursor(self._get_cursor_shape_for_edge(edge)))
-            elif pos.y() <= 28 and not self._is_over_title_bar_buttons(pos):
-                self.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
-                obj.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
             else:
                 self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
                 obj.setCursor(QCursor(Qt.CursorShape.ArrowCursor))

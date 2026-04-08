@@ -1425,7 +1425,69 @@ class MainController(QObject):
         QApplication.quit()
 
 
+class SingleInstance:
+    """单实例检查器（使用 Windows Mutex）"""
+
+    def __init__(self, app_id: str):
+        self._app_id = app_id
+        self._mutex = None
+        self._is_first_instance = False
+
+    def try_lock(self) -> bool:
+        """尝试获取实例锁，返回是否是第一个实例"""
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                # 创建命名 Mutex
+                mutex_name = f"Global\\{self._app_id}"
+                self._mutex = ctypes.windll.kernel32.CreateMutexW(
+                    None, False, mutex_name
+                )
+                last_error = ctypes.windll.kernel32.GetLastError()
+
+                # ERROR_ALREADY_EXISTS = 183，表示 Mutex 已存在
+                if last_error == 183:
+                    self._is_first_instance = False
+                    return False
+                else:
+                    self._is_first_instance = True
+                    return True
+            except Exception as e:
+                log_error(f"创建 Mutex 失败: {e}")
+                # 如果创建失败，允许程序继续运行
+                return True
+        else:
+            # 非 Windows 平台，暂时允许多实例
+            return True
+
+    def release(self):
+        """释放实例锁"""
+        if sys.platform == 'win32' and self._mutex:
+            try:
+                import ctypes
+                ctypes.windll.kernel32.ReleaseMutex(self._mutex)
+                ctypes.windll.kernel32.CloseHandle(self._mutex)
+            except Exception:
+                pass
+            self._mutex = None
+
+
 def main():
+    # 单实例检查
+    from config import APP_ID
+    single_instance = SingleInstance(APP_ID)
+
+    if not single_instance.try_lock():
+        # 已有实例在运行，显示提示
+        app = QApplication(sys.argv)
+        QMessageBox.warning(
+            None,
+            APP_NAME,
+            f"{APP_NAME} 已经在运行中！\n\n请在系统托盘查找已有实例。",
+            QMessageBox.StandardButton.Ok
+        )
+        sys.exit(0)
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName(APP_NAME)
@@ -1441,8 +1503,10 @@ def main():
     controller.start()
 
     exit_code = app.exec()
-    
+
     controller.stop()
+    # 释放单实例锁
+    single_instance.release()
     sys.exit(exit_code)
 
 

@@ -14,10 +14,12 @@ try:
     from ..utils.history import get_history, HistoryItem
     from ..utils.theme import get_theme, get_scrollbar_style, get_splitter_style
     from ..config import APP_NAME, get_config
+    from ..utils.tts import get_tts
 except ImportError:
     from utils.history import get_history, HistoryItem
     from utils.theme import get_theme, get_scrollbar_style, get_splitter_style
     from config import APP_NAME, get_config
+    from utils.tts import get_tts
 
 
 class HistoryWindow(QWidget):
@@ -409,6 +411,26 @@ class HistoryWindow(QWidget):
         self._copy_original_btn.clicked.connect(self._copy_original)
         btn_layout.addWidget(self._copy_original_btn)
 
+        # 朗读原文按钮
+        self._speak_original_btn = QPushButton("🔊")
+        self._speak_original_btn.setFixedSize(32, 32)
+        self._speak_original_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._speak_original_btn.setToolTip("朗读原文")
+        self._speak_original_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {theme['button_bg']};
+                color: {theme['text_primary']};
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme['button_hover']};
+            }}
+        """)
+        self._speak_original_btn.clicked.connect(self._speak_original)
+        btn_layout.addWidget(self._speak_original_btn)
+
         # 复制译文按钮
         self._copy_btn = QPushButton("复制译文")
         self._copy_btn.setStyleSheet(f"""
@@ -427,6 +449,26 @@ class HistoryWindow(QWidget):
         """)
         self._copy_btn.clicked.connect(self._copy_translated)
         btn_layout.addWidget(self._copy_btn)
+
+        # 朗读译文按钮
+        self._speak_btn = QPushButton("🔊")
+        self._speak_btn.setFixedSize(32, 32)
+        self._speak_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._speak_btn.setToolTip("朗读译文")
+        self._speak_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {theme['accent_color']};
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme['accent_hover']};
+            }}
+        """)
+        self._speak_btn.clicked.connect(self._speak_translated)
+        btn_layout.addWidget(self._speak_btn)
 
         btn_layout.addStretch()
         detail_layout.addLayout(btn_layout)
@@ -681,6 +723,34 @@ class HistoryWindow(QWidget):
             }}
         """)
 
+        # 更新朗读原文按钮样式
+        self._speak_original_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {theme['button_bg']};
+                color: {theme['text_primary']};
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme['button_hover']};
+            }}
+        """)
+
+        # 更新朗读译文按钮样式
+        self._speak_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {theme['accent_color']};
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme['accent_hover']};
+            }}
+        """)
+
         # 更新状态栏
         self._status_label.setStyleSheet(f"""
             QLabel {{
@@ -774,6 +844,26 @@ class HistoryWindow(QWidget):
             clipboard = QApplication.clipboard()
             clipboard.setText(self._current_item.translated_text)
             self._status_label.setText("译文已复制到剪贴板")
+
+    def _speak_original(self):
+        """朗读原文"""
+        if self._current_item:
+            tts = get_tts()
+            if tts.is_speaking():
+                tts.stop()
+            else:
+                tts.speak(self._current_item.original_text)
+                self._status_label.setText("正在朗读原文...")
+
+    def _speak_translated(self):
+        """朗读译文"""
+        if self._current_item:
+            tts = get_tts()
+            if tts.is_speaking():
+                tts.stop()
+            else:
+                tts.speak(self._current_item.translated_text)
+                self._status_label.setText("正在朗读译文...")
 
     def _clear_history(self):
         """清空历史"""

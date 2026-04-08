@@ -12,9 +12,11 @@ from PyQt6.QtGui import QColor, QCursor, QMouseEvent, QKeySequence, QIcon, QFont
 try:
     from ..utils.theme import get_theme, get_scrollbar_style, get_splitter_style, get_menu_style, get_combobox_style
     from ..config import get_config
+    from ..utils.tts import get_tts
 except ImportError:
     from utils.theme import get_theme, get_scrollbar_style, get_splitter_style, get_menu_style, get_combobox_style
     from config import get_config
+    from utils.tts import get_tts
 
 
 class StreamingTranslationWorker(QThread):
@@ -469,7 +471,20 @@ class TranslatorWindow(QWidget):
         self._input_text.setAcceptRichText(False)  # 禁用富文本
         self._splitter.addWidget(self._input_text)
 
-        # 翻译结果显示区域 - 纯文本显示
+        # 翻译结果显示区域 - 包装在容器中以支持右下角按钮
+        self._output_container = QWidget()
+        self._output_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: transparent;
+                border: 1px solid {theme['border_color']};
+                border-radius: 4px;
+            }}
+        """)
+        self._output_layout = QVBoxLayout(self._output_container)
+        self._output_layout.setContentsMargins(0, 0, 0, 0)
+        self._output_layout.setSpacing(0)
+
+        # 翻译结果文本框
         self._output_text = QTextEdit()
         self._output_text.setReadOnly(True)
         self._output_text.setFont(QFont("Microsoft YaHei", self._font_size))
@@ -482,7 +497,7 @@ class TranslatorWindow(QWidget):
             QTextEdit {{
                 background-color: transparent;
                 color: {theme['text_primary']};
-                border: 1px solid {theme['border_color']};
+                border: none;
                 border-radius: 4px;
                 padding: 8px;
                 font-size: {self._font_size}px;
@@ -492,7 +507,60 @@ class TranslatorWindow(QWidget):
         self._output_text.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._output_text.customContextMenuRequested.connect(self._show_output_context_menu)
         self._output_text.setAcceptRichText(False)  # 禁用富文本
-        self._splitter.addWidget(self._output_text)
+        self._output_layout.addWidget(self._output_text, 1)
+
+        # 底部按钮区域
+        self._output_button_layout = QHBoxLayout()
+        self._output_button_layout.setContentsMargins(8, 0, 8, 4)
+        self._output_button_layout.addStretch()
+
+        # 朗读按钮（朗读译文）
+        self._speak_output_btn = QPushButton("🔊")
+        self._speak_output_btn.setObjectName("speakOutputBtn")
+        self._speak_output_btn.setFixedSize(24, 24)
+        self._speak_output_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._speak_output_btn.setToolTip("朗读译文")
+        self._speak_output_btn.setStyleSheet(f"""
+            QPushButton#speakOutputBtn {{
+                background-color: transparent;
+                color: {theme['text_muted']};
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+            }}
+            QPushButton#speakOutputBtn:hover {{
+                background-color: {theme['button_hover']};
+                color: {theme['text_primary']};
+            }}
+        """)
+        self._speak_output_btn.clicked.connect(self._speak_output)
+        self._output_button_layout.addWidget(self._speak_output_btn)
+
+        # 复制按钮（复制原文和译文）
+        self._copy_output_btn = QPushButton("📋")
+        self._copy_output_btn.setObjectName("copyOutputBtn")
+        self._copy_output_btn.setFixedSize(24, 24)
+        self._copy_output_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._copy_output_btn.setToolTip("复制原文和译文")
+        self._copy_output_btn.setStyleSheet(f"""
+            QPushButton#copyOutputBtn {{
+                background-color: transparent;
+                color: {theme['text_muted']};
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+            }}
+            QPushButton#copyOutputBtn:hover {{
+                background-color: {theme['button_hover']};
+                color: {theme['text_primary']};
+            }}
+        """)
+        self._copy_output_btn.clicked.connect(self._copy_all_text)
+        self._output_button_layout.addWidget(self._copy_output_btn)
+
+        self._output_layout.addLayout(self._output_button_layout)
+
+        self._splitter.addWidget(self._output_container)
 
         # 设置分割器初始比例
         self._splitter.setSizes([150, 150])
@@ -713,19 +781,81 @@ class TranslatorWindow(QWidget):
             {get_scrollbar_style(theme)}
         """)
 
+        # 更新输出框容器
+        self._output_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: transparent;
+                border: 1px solid {theme['border_color']};
+                border-radius: 4px;
+            }}
+        """)
+
         # 更新输出框
         self._output_text.setFont(QFont("Microsoft YaHei", self._font_size))
         self._output_text.setStyleSheet(f"""
             QTextEdit {{
                 background-color: transparent;
                 color: {theme['text_primary']};
-                border: 1px solid {theme['border_color']};
+                border: none;
                 border-radius: 4px;
                 padding: 8px;
                 font-size: {self._font_size}px;
             }}
             {get_scrollbar_style(theme)}
         """)
+
+        # 更新复制按钮样式
+        self._copy_output_btn.setStyleSheet(f"""
+            QPushButton#copyOutputBtn {{
+                background-color: transparent;
+                color: {theme['text_muted']};
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+            }}
+            QPushButton#copyOutputBtn:hover {{
+                background-color: {theme['button_hover']};
+                color: {theme['text_primary']};
+            }}
+        """)
+
+        # 更新朗读按钮样式
+        self._speak_output_btn.setStyleSheet(f"""
+            QPushButton#speakOutputBtn {{
+                background-color: transparent;
+                color: {theme['text_muted']};
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+            }}
+            QPushButton#speakOutputBtn:hover {{
+                background-color: {theme['button_hover']};
+                color: {theme['text_primary']};
+            }}
+        """)
+
+    def _copy_all_text(self):
+        """复制原文和译文"""
+        clipboard = QApplication.clipboard()
+        original_text = self._input_text.toPlainText()
+        translated_text = self._output_text.toPlainText()
+        if original_text and translated_text:
+            text = f"原文：\n{original_text}\n\n译文：\n{translated_text}"
+            clipboard.setText(text)
+        elif translated_text:
+            clipboard.setText(translated_text)
+        elif original_text:
+            clipboard.setText(original_text)
+
+    def _speak_output(self):
+        """朗读译文"""
+        text = self._output_text.toPlainText()
+        if text:
+            tts = get_tts()
+            if tts.is_speaking():
+                tts.stop()
+            else:
+                tts.speak(text)
 
     def _clear_all(self):
         """清空所有内容"""

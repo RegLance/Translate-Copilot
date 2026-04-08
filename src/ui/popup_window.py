@@ -14,10 +14,12 @@ try:
     from ..config import get_config
     from ..core.translator import TranslationResult
     from ..utils.logger import log_debug, log_error
+    from ..utils.tts import get_tts
 except ImportError:
     from config import get_config
     from core.translator import TranslationResult
     from utils.logger import log_debug, log_error
+    from utils.tts import get_tts
 
 
 # 主题样式定义
@@ -410,6 +412,7 @@ class PopupWindow(QWidget):
         self._result_container.setStyleSheet("background-color: transparent;")
         self._result_inner_layout = QVBoxLayout(self._result_container)
         self._result_inner_layout.setContentsMargins(8, 8, 8, 8)
+        self._result_inner_layout.setSpacing(0)
 
         # 翻译结果标签
         self._result_label = QLabel()
@@ -431,7 +434,58 @@ class PopupWindow(QWidget):
         self._result_label.setCursor(QCursor(Qt.CursorShape.IBeamCursor))
         self._result_label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._result_label.customContextMenuRequested.connect(self._show_result_context_menu)
-        self._result_inner_layout.addWidget(self._result_label)
+        self._result_inner_layout.addWidget(self._result_label, 1)
+
+        # 底部按钮区域
+        self._result_button_layout = QHBoxLayout()
+        self._result_button_layout.setContentsMargins(0, 4, 0, 0)
+        self._result_button_layout.addStretch()
+
+        # 朗读按钮（朗读译文）
+        self._speak_result_btn = QPushButton("🔊")
+        self._speak_result_btn.setObjectName("speakResultBtn")
+        self._speak_result_btn.setFixedSize(24, 24)
+        self._speak_result_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._speak_result_btn.setToolTip("朗读译文")
+        self._speak_result_btn.setStyleSheet("""
+            QPushButton#speakResultBtn {
+                background-color: transparent;
+                color: #888888;
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QPushButton#speakResultBtn:hover {
+                background-color: #3d3d3d;
+                color: #ffffff;
+            }
+        """)
+        self._speak_result_btn.clicked.connect(self._speak_result)
+        self._result_button_layout.addWidget(self._speak_result_btn)
+
+        # 复制按钮（复制原文和译文）
+        self._copy_result_btn = QPushButton("📋")
+        self._copy_result_btn.setObjectName("copyResultBtn")
+        self._copy_result_btn.setFixedSize(24, 24)
+        self._copy_result_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._copy_result_btn.setToolTip("复制原文和译文")
+        self._copy_result_btn.setStyleSheet("""
+            QPushButton#copyResultBtn {
+                background-color: transparent;
+                color: #888888;
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QPushButton#copyResultBtn:hover {
+                background-color: #3d3d3d;
+                color: #ffffff;
+            }
+        """)
+        self._copy_result_btn.clicked.connect(self._copy_all_text)
+        self._result_button_layout.addWidget(self._copy_result_btn)
+
+        self._result_inner_layout.addLayout(self._result_button_layout)
 
         self._result_scroll.setWidget(self._result_container)
         self._splitter.addWidget(self._result_scroll)
@@ -621,6 +675,36 @@ class PopupWindow(QWidget):
                 color: {theme['result_text']};
                 font-size: {self._font_size}px;
                 line-height: 1.6;
+            }}
+        """)
+
+        # 朗读按钮样式
+        self._speak_result_btn.setStyleSheet(f"""
+            QPushButton#speakResultBtn {{
+                background-color: transparent;
+                color: {theme['title_color']};
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+            }}
+            QPushButton#speakResultBtn:hover {{
+                background-color: {theme['scrollbar_handle']};
+                color: {theme['result_text']};
+            }}
+        """)
+
+        # 复制按钮样式
+        self._copy_result_btn.setStyleSheet(f"""
+            QPushButton#copyResultBtn {{
+                background-color: transparent;
+                color: {theme['title_color']};
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+            }}
+            QPushButton#copyResultBtn:hover {{
+                background-color: {theme['scrollbar_handle']};
+                color: {theme['result_text']};
             }}
         """)
 
@@ -1330,6 +1414,16 @@ class PopupWindow(QWidget):
         clipboard = QApplication.clipboard()
         text = f"原文：\n{self._original_label.text()}\n\n译文：\n{self._result_label.text()}"
         clipboard.setText(text)
+
+    def _speak_result(self):
+        """朗读译文"""
+        text = self._result_label.text()
+        if text:
+            tts = get_tts()
+            if tts.is_speaking():
+                tts.stop()
+            else:
+                tts.speak(text)
 
     def keyPressEvent(self, event):
         """键盘事件处理"""

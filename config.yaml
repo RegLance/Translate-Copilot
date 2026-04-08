@@ -2,9 +2,7 @@
 
 # 翻译服务配置（阿里云百炼）
 translator:
-  api_key: "sk-sp-019798d32d054d35b0841a6b7e2c1fd1"
-  model: "qwen3-coder-plus"  # 千问代码模型（支持 coding plan）
-  base_url: "https://coding.dashscope.aliyuncs.com/v1"
+  
   timeout: 15
 
 # 鼠标悬停触发配置

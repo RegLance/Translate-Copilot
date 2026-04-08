@@ -872,6 +872,18 @@ class SettingsDialog(QDialog):
 
             self._config.save()
 
+            # 重新初始化翻译器客户端（使用新的 API 配置）
+            try:
+                from .core.translator import reinitialize_translator
+                reinitialize_translator()
+                log_info("翻译器客户端已重新初始化")
+            except ImportError:
+                from core.translator import reinitialize_translator
+                reinitialize_translator()
+                log_info("翻译器客户端已重新初始化")
+            except Exception as e:
+                log_error(f"重新初始化翻译器失败: {e}")
+
             # 如果热键改变了，重新注册热键
             hotkey_manager = get_hotkey_manager()
             if old_hotkey != new_hotkey:

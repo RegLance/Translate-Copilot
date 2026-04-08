@@ -48,13 +48,24 @@ class Config:
 
         # 加载配置
         if self._config_path.exists():
+            print(f"加载配置文件: {self._config_path}", file=sys.stderr)
             self._config = self._load_config(str(self._config_path))
             # 验证加载的配置是否有效（至少包含基本结构）
             if not self._validate_config(self._config):
                 print("配置文件验证失败，尝试从备份恢复", file=sys.stderr)
                 self._restore_from_backup()
+            else:
+                print(f"配置加载成功", file=sys.stderr)
+                # 打印关键配置信息（调试用）
+                api_key = self._config.get('translator', {}).get('api_key', '')
+                base_url = self._config.get('translator', {}).get('base_url', '')
+                model = self._config.get('translator', {}).get('model', '')
+                print(f"  - API Key: {'已配置' if api_key else '未配置'}", file=sys.stderr)
+                print(f"  - Base URL: {base_url}", file=sys.stderr)
+                print(f"  - Model: {model}", file=sys.stderr)
         else:
             # 使用默认配置
+            print(f"配置文件不存在，创建默认配置", file=sys.stderr)
             self._config = self._get_default_config()
             self.save()
 

@@ -79,7 +79,11 @@ class Translator:
             config = get_config()
             api_key = config.get('translator.api_key', '')
             base_url = config.get('translator.base_url', '')
+            model = config.get('translator.model', '')
             timeout = config.get('translator.timeout', 60)
+
+            # 调试日志：打印读取到的配置
+            log_info(f"初始化翻译客户端 - API Key: {'已配置' if api_key else '未配置'}, Base URL: {base_url}, Model: {model}")
 
             if not api_key:
                 log_warning("未配置 API Key，请在设置中配置")
@@ -100,7 +104,7 @@ class Translator:
                 timeout=timeout,
             )
             self._last_error = None
-            log_info(f"翻译客户端已初始化: base_url={base_url}")
+            log_info(f"翻译客户端已初始化成功: base_url={base_url}")
 
         except Exception as e:
             log_error(f"初始化翻译客户端失败: {e}")

@@ -1054,8 +1054,28 @@ class TranslatorWindow(QWidget):
                 self._streaming_text = ""
                 self._is_streaming = True
                 self._last_adjusted_height = 0
+
             self._streaming_text += chunk
-            self._output_text.setPlainText(self._streaming_text)
+
+            # 记录当前滚动条位置，判断用户是否在底部
+            scrollbar = self._output_text.verticalScrollBar()
+            was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10  # 允许10px误差
+
+            # 使用 QTextCursor 追加文本，避免频繁 setPlainText 导致滚动条闪烁
+            cursor = self._output_text.textCursor()
+
+            # 移动到文档末尾
+            cursor.movePosition(cursor.MoveOperation.End)
+
+            # 插入新文本（不重新渲染整个文档）
+            cursor.insertText(chunk)
+
+            # 如果用户之前不在底部（正在查看之前的内容），恢复滚动位置
+            # 如果用户在底部，则自动滚动到新内容
+            if was_at_bottom:
+                # 用户在底部，跟随新内容滚动到底部
+                scrollbar.setValue(scrollbar.maximum())
+            # else: 用户正在查看之前的内容，不改变滚动位置（让用户自由滚动）
 
             # 触发高度调整（延迟执行，避免频繁更新）
             if self._is_streaming:

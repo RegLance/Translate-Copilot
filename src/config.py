@@ -143,7 +143,7 @@ class Config:
                 'opacity': 0.95,
             },
             'font': {
-                'size': 14,  # 字体大小
+                'size': 15,  # 字体大小
             },
             'hotkey': {
                 'translator_window': 'Ctrl+O',  # 唤醒翻译窗口的快捷键

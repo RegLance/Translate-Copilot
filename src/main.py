@@ -19,12 +19,15 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QPoint, QTimer, QProp
 from PyQt6.QtGui import QFont, QColor, QCursor, QMouseEvent, QAction, QIcon, QPixmap, QPainter, QPen, QKeySequence, QPalette
 
 # 设置高 DPI 支持
-if sys.platform == 'win32':
-    import ctypes
-    try:
-        ctypes.windll.user32.SetProcessDpiAwareness(2)
-    except Exception:
-        pass
+# 注意：不再手动设置 DPI awareness，让 PyQt6 自己处理
+# 手动设置 SetProcessDpiAwareness(2) 会与 Qt 的 DPI 处理机制冲突
+# 导致跨屏幕拖动时窗口尺寸异常
+# if sys.platform == 'win32':
+#     import ctypes
+#     try:
+#         ctypes.windll.user32.SetProcessDpiAwareness(2)
+#     except Exception:
+#         pass
 
 
 # ============================================================================
@@ -941,8 +944,8 @@ class SettingsDialog(QDialog):
             # 更新所有窗口主题
             self._update_all_themes()
 
-            # 使用自定义提示框
-            self._show_message_dialog("保存成功", "设置已保存", "info")
+            # 使用自定义提示框，只显示"保存成功"
+            self._show_save_success_toast()
         finally:
             # 恢复鼠标检测器
             try:
@@ -1004,6 +1007,138 @@ class SettingsDialog(QDialog):
         self.accept()
         # 延迟显示 Toast（确保对话框已完全关闭）
         QTimer.singleShot(100, lambda: ToastWidget.show_message(title, message, msg_type))
+
+    def _show_save_success_toast(self):
+        """显示保存成功提示（简洁版：只显示绿色\"保存成功\"）"""
+        # 先关闭设置对话框
+        self.accept()
+        # 延迟显示简洁 Toast
+        QTimer.singleShot(100, lambda: SimpleToastWidget.show_message("保存成功"))
+
+
+class SimpleToastWidget(QWidget):
+    """简洁 Toast 消息提示组件（单行文字，宽度自适应）"""
+
+    # 全局列表，保持Toast引用防止被垃圾回收
+    _active_toasts = []
+
+    def __init__(self, message: str):
+        super().__init__(None)  # 无父窗口
+
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+
+        self._setup_ui(message)
+        self._position_window()
+
+        # 自动关闭定时器
+        self._close_timer = QTimer(self)
+        self._close_timer.setSingleShot(True)
+        self._close_timer.timeout.connect(self._fade_out)
+        self._close_timer.start(2000)  # 2秒后开始消失
+
+        # 淡出动画
+        self._opacity = 1.0
+        self._fade_timer = QTimer(self)
+        self._fade_timer.timeout.connect(self._do_fade)
+
+    def _setup_ui(self, message: str):
+        """设置UI - 单行文字，宽度自适应"""
+        # 使用 QFrame 作为容器，避免样式影响子控件
+        self._container = QFrame(self)
+        self._container.setObjectName("toastContainer")
+
+        # 主布局
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self._container)
+
+        # 内容布局
+        layout = QHBoxLayout(self._container)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(6)
+
+        # 绿色背景 - 只应用到容器
+        bg_color = "#1a7f37"
+
+        self._container.setStyleSheet(f"""
+            QFrame#toastContainer {{
+                background-color: {bg_color};
+                border-radius: 6px;
+            }}
+        """)
+
+        # 勾选图标
+        icon_label = QLabel("✓")
+        icon_label.setStyleSheet("""
+            QLabel {
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: bold;
+                background-color: transparent;
+            }
+        """)
+        layout.addWidget(icon_label)
+
+        # 文字
+        msg_label = QLabel(message)
+        msg_label.setStyleSheet("""
+            QLabel {
+                color: #ffffff;
+                font-size: 13px;
+                background-color: transparent;
+            }
+        """)
+        layout.addWidget(msg_label)
+
+        # 宽度自适应文字长度
+        self.adjustSize()
+
+        # 添加阴影
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(8)
+        shadow.setColor(QColor(0, 0, 0, 60))
+        shadow.setOffset(0, 2)
+        self.setGraphicsEffect(shadow)
+
+    def _position_window(self):
+        """定位窗口 - 屏幕底部中央"""
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geo = screen.availableGeometry()
+            x = (screen_geo.width() - self.width()) // 2
+            y = screen_geo.height() - self.height() - 60
+            self.move(x, y)
+
+    def _fade_out(self):
+        """开始淡出"""
+        self._fade_timer.start(30)  # 30ms间隔
+
+    def _do_fade(self):
+        """执行淡出动画"""
+        self._opacity -= 0.05
+        if self._opacity <= 0:
+            self._fade_timer.stop()
+            self.close()
+            # 从全局列表移除引用
+            if self in SimpleToastWidget._active_toasts:
+                SimpleToastWidget._active_toasts.remove(self)
+            self.deleteLater()
+        else:
+            self.setWindowOpacity(self._opacity)
+
+    @staticmethod
+    def show_message(message: str):
+        """静态方法：显示简洁Toast消息"""
+        toast = SimpleToastWidget(message)
+        # 添加到全局列表，防止被垃圾回收
+        SimpleToastWidget._active_toasts.append(toast)
+        toast.show()
 
 
 class ToastWidget(QWidget):

@@ -282,6 +282,7 @@ try:
     from .utils.history import add_translation_history
     from .utils.theme import get_theme, get_scrollbar_style, get_lineedit_style, get_combobox_style, get_checkbox_style, get_spinbox_style
     from .utils.hotkey_manager import get_hotkey_manager
+    from .utils.session_monitor import get_session_monitor
 except ImportError:
     # 打包后的导入路径
     from src.config import get_config, APP_NAME
@@ -301,6 +302,7 @@ except ImportError:
     from src.utils.history import add_translation_history
     from src.utils.theme import get_theme, get_scrollbar_style, get_lineedit_style, get_combobox_style, get_checkbox_style, get_spinbox_style
     from src.utils.hotkey_manager import get_hotkey_manager
+    from src.utils.session_monitor import get_session_monitor
 
 
 def setup_auto_start(enable: bool):
@@ -1457,6 +1459,7 @@ class MainController(QObject):
         self._text_capture = get_text_capture()
         self._hotkey_manager = get_hotkey_manager()
         self._writing_service = get_writing_service()
+        self._session_monitor = get_session_monitor()
 
         # 翻译窗口实例
         self._translator_window = get_translator_window()
@@ -1480,6 +1483,9 @@ class MainController(QObject):
         self._translator_window.closed.connect(self._on_translator_window_closed)
         self._hotkey_manager.hotkey_triggered.connect(self._on_hotkey_triggered)
         self._hotkey_manager.writing_hotkey_triggered.connect(self._on_writing_hotkey_triggered)
+        # 会话锁屏/解锁信号
+        self._session_monitor.session_locked.connect(self._on_session_locked)
+        self._session_monitor.session_unlocked.connect(self._on_session_unlocked)
 
     def _check_config(self):
         """检查配置（API 配置已硬编码，无需检查）"""
@@ -1499,6 +1505,7 @@ class MainController(QObject):
 
     def start(self):
         self._selection_detector.start()
+        self._session_monitor.start()
         self._tray_icon.show()
         log_info(f"{APP_NAME} 已启动")
 
@@ -1526,6 +1533,7 @@ class MainController(QObject):
         self._tray_icon.hide()
         self._tray_icon.cleanup()
         self._text_capture.cleanup()
+        self._session_monitor.cleanup()
 
         log_info(f"{APP_NAME} 已停止")
 
@@ -1832,6 +1840,33 @@ class MainController(QObject):
     def _on_exit_requested(self):
         self.stop()
         QApplication.quit()
+
+    def _on_session_locked(self):
+        """系统锁屏时暂停划词检测相关的鼠标钩子"""
+        log_info("系统锁屏，暂停划词检测")
+        try:
+            hover_detector = get_hover_detector()
+            hover_detector.pause()
+        except Exception:
+            pass
+        try:
+            self._selection_detector.pause()
+        except Exception:
+            pass
+
+    def _on_session_unlocked(self):
+        """系统解锁后恢复划词检测，并重启鼠标钩子防止卡顿"""
+        log_info("系统解锁，恢复划词检测并重建鼠标钩子")
+        try:
+            hover_detector = get_hover_detector()
+            hover_detector.restart()
+            hover_detector.resume()
+        except Exception as e:
+            log_error(f"恢复悬停检测器失败: {e}")
+        try:
+            self._selection_detector.resume()
+        except Exception as e:
+            log_error(f"恢复选择检测器失败: {e}")
 
 
 class SingleInstance:

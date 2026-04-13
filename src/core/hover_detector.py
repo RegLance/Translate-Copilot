@@ -107,6 +107,14 @@ class HoverDetector(QObject):
         """恢复检测"""
         self._is_paused = False
 
+    def restart(self):
+        """重启鼠标监听器（用于锁屏恢复后重建钩子）"""
+        was_running = self._mouse_listener is not None
+        if was_running:
+            self.stop()
+            self.start()
+            print("悬停检测器已重启（钩子已重建）")
+
     def set_enabled(self, enabled: bool):
         """设置是否启用检测"""
         self._is_enabled = enabled

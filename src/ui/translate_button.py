@@ -77,7 +77,8 @@ class TranslateButton(QWidget):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.Tool |
+            Qt.WindowType.NoDropShadowWindowHint
         )
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -88,19 +89,7 @@ class TranslateButton(QWidget):
         self.create()
         # 强制获取窗口ID，确保底层窗口句柄已创建完成
         # create() 只是准备创建，winId() 才真正触发底层创建
-        hwnd = int(self.winId())
-
-        # Windows 11 DWM 会给顶层窗口自动添加阴影，
-        # 通过禁用非客户区渲染来去掉阴影
-        if sys.platform == 'win32':
-            import ctypes
-            DWMWA_NCRENDERING_POLICY = 2
-            DWMNCRP_DISABLED = 1
-            value = ctypes.c_int(DWMNCRP_DISABLED)
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, DWMWA_NCRENDERING_POLICY,
-                ctypes.byref(value), ctypes.sizeof(value)
-            )
+        _ = self.winId()
 
     def _setup_ui(self):
         """设置 UI"""

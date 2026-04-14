@@ -1,16 +1,17 @@
 """全局热键管理模块 - 用于注册和管理全局快捷键
 
+使用 pynput.keyboard.GlobalHotKeys 实现全局热键监听。
+相比 keyboard 库，pynput 提供干净的 stop/start 生命周期，
+锁屏恢复时只需重建 listener，无需 hack 内部状态。
+
 支持多个热键注册：
 - 翻译窗口热键
 - 写作热键
-
-优化：
-- 使用 keyboard 库返回的句柄进行精确注销，避免字符串匹配失败导致的钩子泄漏
-- 提供 reinstall_all 方法，在锁屏恢复后彻底重装所有热键钩子
 """
 import sys
-from typing import Optional, Callable, Dict, Any
-from PyQt6.QtCore import QObject, pyqtSignal, Qt, QMetaObject
+import threading
+from typing import Optional, Callable, Dict
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, Qt, QMetaObject
 
 try:
     from ..utils.logger import log_info, log_error, log_debug
@@ -18,8 +19,75 @@ except ImportError:
     from src.utils.logger import log_info, log_error, log_debug
 
 
+# Qt 格式 -> pynput 格式的修饰键/特殊键映射
+_KEY_MAP = {
+    'ctrl': '<ctrl>',
+    'shift': '<shift>',
+    'alt': '<alt>',
+    'meta': '<cmd>',
+    'space': '<space>',
+    'tab': '<tab>',
+    'enter': '<enter>',
+    'return': '<enter>',
+    'backspace': '<backspace>',
+    'delete': '<delete>',
+    'escape': '<esc>',
+    'esc': '<esc>',
+    'home': '<home>',
+    'end': '<end>',
+    'insert': '<insert>',
+    'pageup': '<page_up>',
+    'pagedown': '<page_down>',
+    'up': '<up>',
+    'down': '<down>',
+    'left': '<left>',
+    'right': '<right>',
+}
+
+# 功能键单独处理: F1~F24
+for _i in range(1, 25):
+    _KEY_MAP[f'f{_i}'] = f'<f{_i}>'
+
+
+def _convert_hotkey_format(hotkey: str) -> Optional[str]:
+    """将 Qt 格式的热键字符串转换为 pynput 格式
+
+    Qt 格式: "Ctrl+O", "Ctrl+Shift+A", "Alt+F1"
+    pynput 格式: "<ctrl>+o", "<ctrl>+<shift>+a", "<alt>+<f1>"
+
+    Returns:
+        转换后的 pynput 格式字符串，转换失败返回 None
+    """
+    try:
+        parts = hotkey.split('+')
+        converted = []
+        for part in parts:
+            part_stripped = part.strip()
+            part_lower = part_stripped.lower()
+
+            if part_lower in _KEY_MAP:
+                converted.append(_KEY_MAP[part_lower])
+            elif len(part_stripped) == 1:
+                # 单个字符键（字母、数字、符号）
+                converted.append(part_stripped.lower())
+            else:
+                # 尝试作为 pynput 特殊键名
+                converted.append(f'<{part_lower}>')
+
+        result = '+'.join(converted)
+
+        # 用 HotKey.parse 验证格式是否合法
+        from pynput.keyboard import HotKey
+        HotKey.parse(result)
+
+        return result
+    except Exception as e:
+        log_error(f"热键格式转换失败: '{hotkey}' -> {e}")
+        return None
+
+
 class HotkeyManager(QObject):
-    """全局热键管理器"""
+    """全局热键管理器（基于 pynput.keyboard.GlobalHotKeys）"""
 
     # 信号
     hotkey_triggered = pyqtSignal()  # 翻译窗口热键触发信号
@@ -27,55 +95,30 @@ class HotkeyManager(QObject):
 
     def __init__(self):
         super().__init__()
-        self._hotkeys: Dict[str, str] = {}  # hotkey_name -> hotkey_string
-        self._hotkey_handles: Dict[str, Any] = {}  # hotkey_name -> keyboard hook handle
-        self._keyboard = None
+        self._hotkeys: Dict[str, str] = {}  # hotkey_name -> hotkey_string (Qt 格式)
+        self._listener = None  # pynput GlobalHotKeys 实例
         self._is_listening = False
+        self._restart_lock = threading.Lock()
 
     def register_hotkey(self, hotkey: str, callback: Callable = None, name: str = "translator_window") -> bool:
         """注册全局热键
 
         Args:
-            hotkey: 热键字符串，如 "Ctrl+O"
+            hotkey: 热键字符串，如 "Ctrl+O"（Qt 格式）
             callback: 热键触发时的回调函数（可选，建议使用信号）
             name: 热键名称，用于标识不同的热键
 
         Returns:
             bool: 是否成功注册
         """
-        # 如果该名称的热键已存在，先注销
-        self.unregister_hotkey(name)
+        # 验证格式是否可转换
+        pynput_format = _convert_hotkey_format(hotkey)
+        if pynput_format is None:
+            log_error(f"无法注册热键 [{name}]: 格式转换失败 '{hotkey}'")
+            return False
 
         self._hotkeys[name] = hotkey
-
-        try:
-            import keyboard
-
-            # 转换热键格式
-            # PyQt格式: Ctrl+O -> keyboard格式: ctrl+o
-            kb_hotkey = hotkey.lower()
-
-            # 根据热键名称选择回调
-            if name == "writing":
-                callback_func = self._on_writing_hotkey_pressed
-            else:
-                callback_func = self._on_hotkey_pressed
-
-            # 注册热键并保存返回的句柄，用于精确注销
-            handle = keyboard.add_hotkey(kb_hotkey, callback_func)
-            self._hotkey_handles[name] = handle
-            self._keyboard = keyboard
-            self._is_listening = True
-
-            log_info(f"已注册全局热键 [{name}]: {hotkey}")
-            return True
-
-        except ImportError:
-            log_error("未安装 keyboard 库，无法使用全局热键功能")
-            return False
-        except Exception as e:
-            log_error(f"注册热键失败: {e}")
-            return False
+        return self._rebuild_listener()
 
     def unregister_hotkey(self, name: str = None):
         """注销热键
@@ -83,85 +126,112 @@ class HotkeyManager(QObject):
         Args:
             name: 热键名称，如果为 None 则注销所有热键
         """
-        if not self._keyboard:
-            return
-
         if name is None:
-            # 注销所有热键
-            for hotkey_name in list(self._hotkeys.keys()):
-                self._remove_hotkey(hotkey_name)
             self._hotkeys.clear()
-            self._hotkey_handles.clear()
         elif name in self._hotkeys:
-            self._remove_hotkey(name)
             del self._hotkeys[name]
-            self._hotkey_handles.pop(name, None)
 
-        if not self._hotkeys:
-            self._is_listening = False
-
-    def _remove_hotkey(self, name: str):
-        """移除单个热键（优先使用句柄精确注销）"""
-        if not self._keyboard:
-            return
-
-        # 优先使用保存的句柄进行注销（更精确可靠）
-        handle = self._hotkey_handles.get(name)
-        if handle is not None:
-            try:
-                self._keyboard.remove_hotkey(handle)
-                log_debug(f"已通过句柄注销热键: {name}")
-                return
-            except Exception as e:
-                log_debug(f"通过句柄注销热键失败，尝试字符串方式: {e}")
-
-        # 回退：使用热键字符串注销
-        hotkey = self._hotkeys.get(name)
-        if hotkey:
-            try:
-                kb_hotkey = hotkey.lower()
-                self._keyboard.remove_hotkey(kb_hotkey)
-                log_debug(f"已通过字符串注销热键: {hotkey}")
-            except Exception as e:
-                log_error(f"注销热键失败: {e}")
+        self._rebuild_listener()
 
     def reinstall_all(self):
-        """彻底重装所有热键（用于锁屏恢复等场景）
+        """重建热键监听器（用于锁屏恢复等场景）
 
-        Windows 锁屏时会切换到安全桌面(Winlogon)，导致 WH_KEYBOARD_LL 低级键盘钩子
-        被静默卸载。keyboard 库自身无法感知这一变化，内部状态已过时。
-        必须先 unhook_all() 彻底清理，再从零注册，才能重新安装底层系统钩子。
+        pynput 的 GlobalHotKeys 基于 WH_KEYBOARD_LL 钩子，
+        Windows 锁屏时钩子可能被系统卸载。
+        只需 stop + 新建 + start 即可恢复，无需任何内部状态 hack。
         """
-        # 保存当前热键配置
-        saved_hotkeys = dict(self._hotkeys)
+        self._rebuild_listener()
 
-        if not saved_hotkeys:
-            return
+    def _rebuild_listener(self) -> bool:
+        """重建 GlobalHotKeys 监听器（核心方法）
 
-        # 彻底清理所有钩子（包括 keyboard 库内部的底层 WH_KEYBOARD_LL 钩子）
+        停止旧的 listener，根据当前 _hotkeys 创建新的。
+        线程安全，防止并发重建。
+
+        Returns:
+            bool: 是否成功构建并启动
+        """
+        if not self._restart_lock.acquire(blocking=False):
+            return False  # 已有重建在进行中
+
         try:
-            import keyboard
-            keyboard.unhook_all()
+            # 停止旧的 listener
+            if self._listener is not None:
+                try:
+                    self._listener.stop()
+                except Exception:
+                    pass
+                self._listener = None
+
+            # 如果没有热键需要监听
+            if not self._hotkeys:
+                self._is_listening = False
+                return True
+
+            # 构建 pynput 热键字典
+            pynput_hotkeys = {}
+            for name, hotkey in self._hotkeys.items():
+                pynput_format = _convert_hotkey_format(hotkey)
+                if pynput_format is None:
+                    continue
+
+                if name == "writing":
+                    pynput_hotkeys[pynput_format] = self._on_writing_hotkey_pressed
+                else:
+                    pynput_hotkeys[pynput_format] = self._on_hotkey_pressed
+
+            if not pynput_hotkeys:
+                self._is_listening = False
+                log_error("所有热键格式转换失败，无法注册")
+                return False
+
+            # 创建并启动新的 listener
+            from pynput.keyboard import GlobalHotKeys
+            self._listener = GlobalHotKeys(pynput_hotkeys)
+            self._listener.start()
+            self._is_listening = True
+
+            hotkey_info = ', '.join(f'{n}: {h}' for n, h in self._hotkeys.items())
+            log_info(f"已注册全局热键: {hotkey_info}")
+            return True
+
+        except Exception as e:
+            log_error(f"重建热键监听器失败: {e}")
+            self._is_listening = False
+            return False
+        finally:
+            self._restart_lock.release()
+
+    def _on_hotkey_pressed(self):
+        """翻译窗口热键按下（pynput 线程回调 -> 切到 Qt 主线程）"""
+        log_debug("翻译窗口热键触发")
+        try:
+            QMetaObject.invokeMethod(
+                self, "_emit_hotkey_triggered",
+                Qt.ConnectionType.QueuedConnection
+            )
         except Exception:
             pass
 
-        self._hotkeys.clear()
-        self._hotkey_handles.clear()
+    def _on_writing_hotkey_pressed(self):
+        """写作热键按下（pynput 线程回调 -> 切到 Qt 主线程）"""
+        log_debug("写作热键触发")
+        try:
+            QMetaObject.invokeMethod(
+                self, "_emit_writing_hotkey_triggered",
+                Qt.ConnectionType.QueuedConnection
+            )
+        except Exception:
+            pass
 
-        # 重新注册所有热键
-        for name, hotkey in saved_hotkeys.items():
-            self.register_hotkey(hotkey, name=name)
-
-        log_info(f"[热键管理器] 已彻底重装 {len(saved_hotkeys)} 个热键")
-
-    def _on_hotkey_pressed(self):
-        """翻译窗口热键按下时的处理"""
-        log_debug(f"翻译窗口热键触发")
+    @pyqtSlot()
+    def _emit_hotkey_triggered(self):
+        """主线程执行：发射翻译窗口热键信号"""
         self.hotkey_triggered.emit()
 
-    def _on_writing_hotkey_pressed(self):
-        """写作热键按下时的处理"""
-        log_debug(f"写作热键触发")
+    @pyqtSlot()
+    def _emit_writing_hotkey_triggered(self):
+        """主线程执行：发射写作热键信号"""
         self.writing_hotkey_triggered.emit()
 
     def update_hotkey(self, new_hotkey: str, name: str = "translator_window") -> bool:
@@ -189,7 +259,13 @@ class HotkeyManager(QObject):
 
     def stop(self):
         """停止热键监听"""
-        self.unregister_hotkey()
+        if self._listener is not None:
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
+            self._listener = None
+        self._hotkeys.clear()
         self._is_listening = False
 
     @property

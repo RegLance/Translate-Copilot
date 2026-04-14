@@ -1508,7 +1508,7 @@ class MainController(QObject):
         1. 系统休眠/睡眠恢复：进程被挂起，QTimer 不触发，通过定时器间隔检测
         2. 屏幕锁定/解锁：进程正常运行，QTimer 正常触发，通过 OpenInputDesktop API 检测
 
-        两种场景下 keyboard 库的 WH_KEYBOARD_LL 钩子和 pynput 的 WH_MOUSE_LL 钩子
+        两种场景下 pynput 的 WH_KEYBOARD_LL 钩子（热键）和 WH_MOUSE_LL 钩子（鼠标）
         都可能被 Windows 系统移除，需要在恢复后重新注册。
         """
         current_time = time.time()
@@ -1553,9 +1553,8 @@ class MainController(QObject):
 
     def _on_session_restored(self):
         """会话恢复后的统一处理（休眠恢复/屏幕解锁共用）"""
-        # 彻底重装所有热键（unhook_all + 重新注册），而非简单 re-register
-        # Windows 锁屏/休眠会静默卸载 WH_KEYBOARD_LL 钩子，
-        # 必须先清理 keyboard 库的过时内部状态才能正确恢复
+        # 重建 pynput 热键监听器（stop + 新建 + start）
+        # Windows 锁屏/休眠会静默卸载 WH_KEYBOARD_LL 钩子
         self._hotkey_retry_count = 0
         self._hotkey_manager.reinstall_all()
 

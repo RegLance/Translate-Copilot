@@ -463,6 +463,18 @@ class TranslateButton(QWidget):
         """重置刚显示状态"""
         self._is_just_shown = False
 
+    def paintEvent(self, event):
+        """绘制事件 - 填充极低透明度背景，确保透明区域可接收鼠标事件
+
+        Windows 下 WA_TranslucentBackground 会导致完全透明像素（alpha=0）
+        被操作系统视为可穿透区域，鼠标事件不会传递给窗口。
+        绘制 alpha=1 的背景（视觉上不可见）确保整个按钮区域都能响应点击。
+        """
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
+        painter.end()
+        super().paintEvent(event)
+
     def mousePressEvent(self, event):
         """鼠标点击事件"""
         if event.button() == Qt.MouseButton.LeftButton:

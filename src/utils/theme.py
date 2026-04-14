@@ -342,6 +342,9 @@ def get_checkbox_style(theme: Dict[str, Any]) -> str:
         QCheckBox::indicator {{
             width: 0px;
             height: 0px;
+            margin: 0px;
+            padding: 0px;
+            border: none;
         }}
     """
 

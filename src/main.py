@@ -1553,9 +1553,11 @@ class MainController(QObject):
 
     def _on_session_restored(self):
         """会话恢复后的统一处理（休眠恢复/屏幕解锁共用）"""
-        # 重新注册所有热键
+        # 彻底重装所有热键（unhook_all + 重新注册），而非简单 re-register
+        # Windows 锁屏/休眠会静默卸载 WH_KEYBOARD_LL 钩子，
+        # 必须先清理 keyboard 库的过时内部状态才能正确恢复
         self._hotkey_retry_count = 0
-        self._register_all_hotkeys()
+        self._hotkey_manager.reinstall_all()
 
         # 重启鼠标监听器（pynput 的低级钩子也可能在会话变更时失效）
         try:

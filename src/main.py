@@ -268,8 +268,7 @@ try:
     from .config import get_config, APP_NAME
     from .core.text_capture import get_text_capture, capture_text_direct
     from .core.selection_detector import get_selection_detector
-    from .core.hover_detector import get_hover_detector
-    from .core.translator import get_translator
+    from .core.translator import get_translator, reinitialize_translator
     from .core.writing import get_writing_service, WritingResult
     from .ui.popup_window import get_popup_window
     from .ui.translate_button import get_translate_button
@@ -287,8 +286,7 @@ except ImportError:
     from src.config import get_config, APP_NAME
     from src.core.text_capture import get_text_capture, capture_text_direct
     from src.core.selection_detector import get_selection_detector
-    from src.core.hover_detector import get_hover_detector
-    from src.core.translator import get_translator
+    from src.core.translator import get_translator, reinitialize_translator
     from src.core.writing import get_writing_service, WritingResult
     from src.ui.popup_window import get_popup_window
     from src.ui.translate_button import get_translate_button
@@ -441,6 +439,40 @@ class SettingsDialog(QDialog):
         scroll_layout.setSpacing(16)
         scroll_layout.setContentsMargins(8, 8, 8, 16)  # 底部增加边距避免视觉截断
 
+        # API 配置组
+        self._api_group = QGroupBox("API 配置")
+        api_layout = QFormLayout(self._api_group)
+        api_layout.setSpacing(10)
+        api_layout.setContentsMargins(12, 20, 12, 12)
+        api_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self._api_url_edit = QLineEdit()
+        self._api_url_edit.setMinimumHeight(32)
+        self._api_url_edit.setPlaceholderText("https://api.openai.com/v1")
+        self._api_url_label = QLabel("Base URL:")
+        api_layout.addRow(self._api_url_label, self._api_url_edit)
+
+        self._api_key_edit = QLineEdit()
+        self._api_key_edit.setMinimumHeight(32)
+        self._api_key_edit.setPlaceholderText("sk-...")
+        self._api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._api_key_label = QLabel("API Key:")
+        api_layout.addRow(self._api_key_label, self._api_key_edit)
+
+        self._model_edit = QLineEdit()
+        self._model_edit.setMinimumHeight(32)
+        self._model_edit.setPlaceholderText("gpt-4o-mini")
+        self._model_label = QLabel("Model:")
+        api_layout.addRow(self._model_label, self._model_edit)
+
+        self._no_proxy_edit = QLineEdit()
+        self._no_proxy_edit.setMinimumHeight(32)
+        self._no_proxy_edit.setPlaceholderText("localhost,127.0.0.1")
+        self._no_proxy_label = QLabel("No Proxy:")
+        api_layout.addRow(self._no_proxy_label, self._no_proxy_edit)
+
+        scroll_layout.addWidget(self._api_group)
+
         # 翻译设置组
         self._trans_group = QGroupBox("翻译设置")
         trans_layout = QFormLayout(self._trans_group)
@@ -508,7 +540,6 @@ class SettingsDialog(QDialog):
         self._hotkey_btn.setMinimumHeight(32)
         self._hotkey_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._hotkey_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._hotkey_btn.setToolTip("点击后按下新的快捷键组合")
         self._hotkey_label = QLabel("唤醒翻译窗口:")
         hotkey_layout.addRow(self._hotkey_label, self._hotkey_btn)
 
@@ -517,9 +548,14 @@ class SettingsDialog(QDialog):
         self._writing_hotkey_btn.setMinimumHeight(32)
         self._writing_hotkey_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._writing_hotkey_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._writing_hotkey_btn.setToolTip("点击后按下新的快捷键组合")
         self._writing_hotkey_label = QLabel("划词写作:")
         hotkey_layout.addRow(self._writing_hotkey_label, self._writing_hotkey_btn)
+
+        # 快捷键提示文字
+        self._hotkey_hint_label = QLabel("点击按钮后按下新的快捷键组合")
+        self._hotkey_hint_label.setStyleSheet(f"color: {self._theme['text_muted']}; font-size: 11px;")
+        self._hotkey_hint_label.setWordWrap(True)
+        hotkey_layout.addRow("", self._hotkey_hint_label)
 
         # 存储当前快捷键值
         self._hotkey_value = "Ctrl+O"
@@ -732,6 +768,7 @@ class SettingsDialog(QDialog):
 
         # 分组框样式
         groupbox_style = self._get_groupbox_style()
+        self._api_group.setStyleSheet(groupbox_style)
         self._trans_group.setStyleSheet(groupbox_style)
         self._theme_group.setStyleSheet(groupbox_style)
         self._font_group.setStyleSheet(groupbox_style)
@@ -742,12 +779,23 @@ class SettingsDialog(QDialog):
 
         # 标签样式
         label_style = f"color: {self._theme['text_secondary']}; font-size: 13px;"
+        self._api_url_label.setStyleSheet(label_style)
+        self._api_key_label.setStyleSheet(label_style)
+        self._model_label.setStyleSheet(label_style)
+        self._no_proxy_label.setStyleSheet(label_style)
         self._target_lang_label.setStyleSheet(label_style)
         self._browser_delay_label.setStyleSheet(label_style)
         self._popup_style_label.setStyleSheet(label_style)
         self._font_size_label.setStyleSheet(label_style)
         self._hotkey_label.setStyleSheet(label_style)
         self._writing_hotkey_label.setStyleSheet(label_style)
+
+        # API 输入框样式
+        lineedit_style = get_lineedit_style(self._theme)
+        self._api_url_edit.setStyleSheet(lineedit_style)
+        self._api_key_edit.setStyleSheet(lineedit_style)
+        self._model_edit.setStyleSheet(lineedit_style)
+        self._no_proxy_edit.setStyleSheet(lineedit_style)
 
         # 下拉框样式
         combobox_style = get_combobox_style(self._theme)
@@ -964,6 +1012,12 @@ class SettingsDialog(QDialog):
 
     def _load_settings(self):
         """加载设置"""
+        # API 配置
+        self._api_url_edit.setText(self._config.get('translator.base_url', ''))
+        self._api_key_edit.setText(self._config.get('translator.api_key', ''))
+        self._model_edit.setText(self._config.get('translator.model', ''))
+        self._no_proxy_edit.setText(self._config.get('translator.no_proxy', ''))
+
         target_lang = self._config.get('target_language', '中文')
         index = self._target_lang_combo.findText(target_lang)
         if index >= 0:
@@ -1023,13 +1077,6 @@ class SettingsDialog(QDialog):
 
     def _save_settings(self):
         """保存设置"""
-        # 暂停鼠标检测器，避免UI重操作期间钩子超时导致鼠标卡顿
-        try:
-            hover_detector = get_hover_detector()
-            hover_detector.pause()
-        except Exception:
-            pass
-
         try:
             selection_detector = get_selection_detector()
             selection_detector.pause()
@@ -1046,6 +1093,12 @@ class SettingsDialog(QDialog):
             new_writing_hotkey = self._writing_hotkey_value
 
             self._config.set('target_language', self._target_lang_combo.currentText())
+
+            # API 配置
+            self._config.set('translator.base_url', self._api_url_edit.text().strip())
+            self._config.set('translator.api_key', self._api_key_edit.text().strip())
+            self._config.set('translator.model', self._model_edit.text().strip())
+            self._config.set('translator.no_proxy', self._no_proxy_edit.text().strip())
 
             # 浏览器划词延迟
             self._config.set('selection.browser_delay_ms', self._browser_delay_spin.value())
@@ -1078,6 +1131,17 @@ class SettingsDialog(QDialog):
 
             self._config.save()
 
+            # 重新初始化翻译器和写作服务（API 配置可能已变更）
+            try:
+                reinitialize_translator()
+            except Exception:
+                pass
+            try:
+                writing_service = get_writing_service()
+                writing_service._load_api_config()
+            except Exception:
+                pass
+
             # 如果热键改变了，重新注册热键
             hotkey_manager = get_hotkey_manager()
             if old_hotkey != new_hotkey:
@@ -1100,13 +1164,6 @@ class SettingsDialog(QDialog):
             # 使用简洁的保存成功提示
             self._show_save_success_toast()
         finally:
-            # 恢复鼠标检测器
-            try:
-                hover_detector = get_hover_detector()
-                hover_detector.resume()
-            except Exception:
-                pass
-
             try:
                 selection_detector = get_selection_detector()
                 selection_detector.resume()
@@ -1508,7 +1565,7 @@ class MainController(QObject):
         1. 系统休眠/睡眠恢复：进程被挂起，QTimer 不触发，通过定时器间隔检测
         2. 屏幕锁定/解锁：进程正常运行，QTimer 正常触发，通过 OpenInputDesktop API 检测
 
-        两种场景下 pynput 的 WH_KEYBOARD_LL 钩子（热键）和 WH_MOUSE_LL 钩子（鼠标）
+        两种场景下 pynput 的 WH_KEYBOARD_LL 钩子（热键）
         都可能被 Windows 系统移除，需要在恢复后重新注册。
         """
         current_time = time.time()
@@ -1557,13 +1614,6 @@ class MainController(QObject):
         # Windows 锁屏/休眠会静默卸载 WH_KEYBOARD_LL 钩子
         self._hotkey_retry_count = 0
         self._hotkey_manager.reinstall_all()
-
-        # 重启鼠标监听器（pynput 的低级钩子也可能在会话变更时失效）
-        try:
-            hover_detector = get_hover_detector()
-            hover_detector._restart_listener()
-        except Exception as e:
-            log_error(f"重启鼠标监听器失败: {e}")
 
     def start(self):
         self._selection_detector.start()

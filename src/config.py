@@ -64,7 +64,6 @@ class Config:
         """验证配置是否有效"""
         if config is None:
             return False
-        # 检查必需的配置结构（translator 不再必需，已硬编码）
         required_keys = ['target_language', 'theme']
         for key in required_keys:
             if key not in config:
@@ -117,15 +116,6 @@ class Config:
                 if config is None:
                     return self._get_default_config()
                 
-                # 清理硬编码的配置项（不再从配置文件读取）
-                if 'translator' in config and isinstance(config['translator'], dict):
-                    for key in ['api_key', 'base_url', 'model', 'timeout', 'no_proxy']:
-                        if key in config['translator']:
-                            del config['translator'][key]
-                # 如果 translator 为空，删除整个键
-                if 'translator' in config and isinstance(config['translator'], dict) and not config['translator']:
-                    del config['translator']
-                
                 return self._merge_with_defaults(config)
         except yaml.YAMLError as e:
             print(f"YAML解析错误: {e}", file=sys.stderr)
@@ -135,8 +125,15 @@ class Config:
             return self._get_default_config()
 
     def _get_default_config(self) -> Dict[str, Any]:
-        """获取默认配置（API 配置已硬编码）"""
+        """获取默认配置"""
         return {
+            'translator': {
+                'api_key': 'sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',  # API Key
+                'base_url': 'https://api.openai.com/v1',  # API Base URL
+                'model': 'gpt-4o-mini',  # 模型名称
+                'timeout': 60,  # 请求超时时间（秒）
+                'no_proxy': '',  # 不使用代理的地址，多个用逗号分隔
+            },
             'target_language': '中文',
             'theme': {
                 'popup_style': 'dark',  # 'dark' 或 'light'
@@ -171,14 +168,11 @@ class Config:
         """合并用户配置与默认配置"""
         defaults = self._get_default_config()
 
-        def merge_dict(base: dict, override: dict, parent_key: str = '') -> dict:
+        def merge_dict(base: dict, override: dict) -> dict:
             result = base.copy()
             for key, value in override.items():
-                # 跳过硬编码的配置项（在 translator 下）
-                if parent_key == 'translator' and key in ('api_key', 'base_url', 'model', 'timeout', 'no_proxy'):
-                    continue
                 if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-                    result[key] = merge_dict(result[key], value, key)
+                    result[key] = merge_dict(result[key], value)
                 else:
                     result[key] = value
             return result

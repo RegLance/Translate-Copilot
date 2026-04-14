@@ -19,13 +19,11 @@ try:
     from ..config import get_config
     from ..utils.logger import log_warning, log_info, log_translation, log_debug, log_error
     from ..utils.language_detector import detect_language, is_chinese_text, get_translation_direction
-    from .api_config import *
 except ImportError:
     # 打包后或直接运行时的导入路径
     from src.config import get_config
     from src.utils.logger import log_warning, log_info, log_translation, log_debug, log_error
     from src.utils.language_detector import detect_language, is_chinese_text, get_translation_direction
-    from src.core.api_config import *
 
 
 # 语言检测锁，确保线程安全
@@ -69,19 +67,22 @@ class TranslationResult:
 class Translator:
     """翻译服务类"""
 
-    # ==================== API 配置（硬编码） ====================
-    _api_key: str = config_api_key       # API Key
-    _base_url: str = config_base_url      # API Base URL
-    _model: str = config_model        # 模型名称
-    _timeout: int = 60       # 请求超时时间（秒）
-    _no_proxy: str = config_no_proxy      # 不使用代理的地址，多个用逗号分隔，如：localhost,127.0.0.1,*.internal
-
     def __init__(self):
         """初始化翻译服务"""
         self._client: Optional[OpenAI] = None
         self._cache: Dict[str, TranslationResult] = {}
         self._last_error: Optional[str] = None
+        self._load_api_config()
         self._init_client()
+
+    def _load_api_config(self):
+        """从配置文件加载 API 配置"""
+        config = get_config()
+        self._api_key = config.get('translator.api_key', '')
+        self._base_url = config.get('translator.base_url', '')
+        self._model = config.get('translator.model', '')
+        self._timeout = config.get('translator.timeout', 60)
+        self._no_proxy = config.get('translator.no_proxy', '')
 
     def _init_client(self):
         """初始化 OpenAI 客户端"""
@@ -540,6 +541,7 @@ Requirements:
 
     def reinitialize(self):
         """重新初始化客户端（配置变更后）"""
+        self._load_api_config()
         self._init_client()
 
 

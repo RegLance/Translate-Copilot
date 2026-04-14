@@ -21,13 +21,11 @@ try:
     from ..config import get_config
     from ..utils.logger import log_info, log_error, log_debug, log_warning
     from ..utils.language_detector import detect_language, is_chinese_text, get_translation_direction
-    from .api_config import *
 except ImportError:
     # 打包后或直接运行时的导入路径
     from src.config import get_config
     from src.utils.logger import log_info, log_error, log_debug, log_warning
     from src.utils.language_detector import detect_language, is_chinese_text, get_translation_direction
-    from src.core.api_config import *
 
 
 @dataclass
@@ -55,6 +53,7 @@ class WritingService:
         self._current_thread: Optional[threading.Thread] = None
         self._stop_flag = False
         self._translator = None
+        self._load_api_config()
 
     def _get_translator(self):
         """获取翻译器实例"""
@@ -125,12 +124,14 @@ Requirements:
         log_info(f"语言检测: 源语言={source_lang}, 目标语言={target_lang}")
         return (source_lang, target_lang)
 
-    # ==================== API 配置（硬编码，与 Translator 保持一致） ====================
-    _api_key: str = config_api_key
-    _base_url: str = config_base_url
-    _model: str = config_model
-    _timeout: int = 60
-    _no_proxy: str = config_no_proxy  # 不使用代理的地址
+    def _load_api_config(self):
+        """从配置文件加载 API 配置"""
+        config = get_config()
+        self._api_key = config.get('translator.api_key', '')
+        self._base_url = config.get('translator.base_url', '')
+        self._model = config.get('translator.model', '')
+        self._timeout = config.get('translator.timeout', 60)
+        self._no_proxy = config.get('translator.no_proxy', '')
 
     def writing_stream(self, text: str,
                        on_chunk: Callable[[str], None] = None) -> Generator[str, None, None]:
@@ -156,7 +157,7 @@ Requirements:
         # 构建提示词
         system_prompt, user_prompt = self._build_writing_prompt(text, source_lang, target_lang)
 
-        # 使用硬编码的 API 配置（与 Translator 保持一致）
+        # 使用配置文件中的 API 配置
         api_key = self._api_key
         base_url = self._base_url
         model = self._model

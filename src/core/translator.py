@@ -14,6 +14,7 @@ if str(_parent_dir) not in sys.path:
     sys.path.insert(0, str(_parent_dir))
 
 from openai import OpenAI
+from httpx import Timeout
 
 try:
     from ..config import get_config
@@ -94,11 +95,17 @@ class Translator:
                 os.environ['no_proxy'] = self._no_proxy
                 log_debug(f"已设置 NO_PROXY: {self._no_proxy}")
 
-            # 创建客户端
+            # 创建客户端（设置连接超时和读取超时，防止流式响应挂起）
             self._client = OpenAI(
                 api_key=self._api_key,
                 base_url=self._base_url,
-                timeout=self._timeout,
+                timeout=Timeout(
+                    connect=min(self._timeout, 15),  # 连接超时
+                    read=self._timeout,               # 读取超时（chunk 间隔）
+                    write=self._timeout,              # 写入超时
+                    pool=self._timeout,               # 连接池等待超时
+                ),
+                max_retries=0,  # 不自动重试，避免长时间阻塞
             )
             self._last_error = None
             log_info(f"翻译客户端已初始化: base_url={self._base_url}, model={self._model}")
@@ -264,6 +271,7 @@ Requirements:
                 yield "[错误: API 客户端初始化失败]"
                 return
 
+        stream = None
         try:
             stream = self._client.chat.completions.create(
                 model=self._model,
@@ -283,6 +291,14 @@ Requirements:
                     if on_chunk:
                         on_chunk(content)
                     yield content
+
+        except GeneratorExit:
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+            return
 
         except Exception as e:
             error_msg = str(e)
@@ -323,6 +339,7 @@ Requirements:
                 yield "[错误: API 客户端初始化失败]"
                 return
 
+        stream = None
         try:
             stream = self._client.chat.completions.create(
                 model=self._model,
@@ -342,6 +359,14 @@ Requirements:
                     if on_chunk:
                         on_chunk(content)
                     yield content
+
+        except GeneratorExit:
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+            return
 
         except Exception as e:
             error_msg = str(e)
@@ -405,6 +430,7 @@ Requirements:
                 yield "[错误: API 客户端初始化失败]"
                 return
 
+        stream = None
         try:
             stream = self._client.chat.completions.create(
                 model=self._model,
@@ -433,6 +459,15 @@ Requirements:
                 target_language=target_lang
             )
             self._cache[cache_key] = result
+
+        except GeneratorExit:
+            # 生成器被外部关闭（取消翻译），安全清理流
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+            return
 
         except Exception as e:
             # 记录崩溃日志

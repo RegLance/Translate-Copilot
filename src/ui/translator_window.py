@@ -1,7 +1,6 @@
 """独立翻译窗口模块 - QTranslator（无边框风格，支持主题切换、纯文本显示）"""
 import sys
 import math
-from collections import deque
 from typing import Optional
 from pathlib import Path
 from PyQt6.QtWidgets import (
@@ -238,7 +237,6 @@ class StreamingTranslationWorker(QThread):
         self._text = text
         self._target_language = target_language
         self._is_cancelled = False
-        self._generator = None  # 保存生成器引用，用于取消时关闭底层流
 
     def run(self):
         try:
@@ -247,8 +245,7 @@ class StreamingTranslationWorker(QThread):
             full_text = ""
 
             # 使用智能翻译（自动检测语言）
-            self._generator = translator.translate_stream(self._text, self._target_language, auto_detect=True)
-            for chunk in self._generator:
+            for chunk in translator.translate_stream(self._text, self._target_language, auto_detect=True):
                 if self._is_cancelled:
                     return
 
@@ -262,18 +259,10 @@ class StreamingTranslationWorker(QThread):
         except Exception as e:
             if not self._is_cancelled:
                 self.translation_error.emit(str(e))
-        finally:
-            self._generator = None
 
     def cancel(self):
-        """取消翻译，关闭生成器以释放网络连接"""
+        """取消翻译"""
         self._is_cancelled = True
-        gen = self._generator
-        if gen is not None:
-            try:
-                gen.close()
-            except Exception:
-                pass
 
 
 class StreamingPolishingWorker(QThread):
@@ -287,7 +276,6 @@ class StreamingPolishingWorker(QThread):
         super().__init__()
         self._text = text
         self._is_cancelled = False
-        self._generator = None
 
     def run(self):
         try:
@@ -295,8 +283,7 @@ class StreamingPolishingWorker(QThread):
             translator = get_translator()
             full_text = ""
 
-            self._generator = translator.polishing_stream(self._text)
-            for chunk in self._generator:
+            for chunk in translator.polishing_stream(self._text):
                 if self._is_cancelled:
                     return
 
@@ -310,18 +297,10 @@ class StreamingPolishingWorker(QThread):
         except Exception as e:
             if not self._is_cancelled:
                 self.polishing_error.emit(str(e))
-        finally:
-            self._generator = None
 
     def cancel(self):
-        """取消润色，关闭生成器以释放网络连接"""
+        """取消润色"""
         self._is_cancelled = True
-        gen = self._generator
-        if gen is not None:
-            try:
-                gen.close()
-            except Exception:
-                pass
 
 
 class StreamingSummarizeWorker(QThread):
@@ -336,7 +315,6 @@ class StreamingSummarizeWorker(QThread):
         self._text = text
         self._target_language = target_language
         self._is_cancelled = False
-        self._generator = None
 
     def run(self):
         try:
@@ -344,8 +322,7 @@ class StreamingSummarizeWorker(QThread):
             translator = get_translator()
             full_text = ""
 
-            self._generator = translator.summarize_stream(self._text, self._target_language)
-            for chunk in self._generator:
+            for chunk in translator.summarize_stream(self._text, self._target_language):
                 if self._is_cancelled:
                     return
 
@@ -359,18 +336,10 @@ class StreamingSummarizeWorker(QThread):
         except Exception as e:
             if not self._is_cancelled:
                 self.summarize_error.emit(str(e))
-        finally:
-            self._generator = None
 
     def cancel(self):
-        """取消总结，关闭生成器以释放网络连接"""
+        """取消总结"""
         self._is_cancelled = True
-        gen = self._generator
-        if gen is not None:
-            try:
-                gen.close()
-            except Exception:
-                pass
 
 
 class TranslatorWindow(QWidget):
@@ -432,7 +401,7 @@ class TranslatorWindow(QWidget):
         self._user_resized_during_streaming = False  # 用户在流式期间手动调整了窗口大小
 
         # 逐字输出相关
-        self._char_queue = deque()  # 待输出的字符缓冲区（deque，popleft O(1)）
+        self._char_queue = []  # 待输出的字符缓冲区
         self._char_timer = QTimer()  # 逐字输出定时器
         self._char_timer.setInterval(10)  # 每个字符间隔 10ms（快速打字效果）
         self._char_timer.timeout.connect(self._flush_char)
@@ -1407,7 +1376,13 @@ class TranslatorWindow(QWidget):
     def _clear_all(self):
         """清空所有内容并取消正在进行的流式输出任务"""
         # 1. 如果当前有翻译/总结/润色任务正在执行，取消它
-        self._cancel_current_worker()
+        if self._current_worker and self._current_worker.isRunning():
+            # 调用取消机制，设置取消标志
+            self._current_worker.cancel()
+            # 等待线程结束（最多1秒），避免资源泄露
+            self._current_worker.wait(1000)
+            # 清理 worker 引用
+            self._current_worker = None
 
         # 2. 重置流式输出状态变量
         self._is_streaming = False
@@ -1450,23 +1425,6 @@ class TranslatorWindow(QWidget):
         self._show_output_scrollbar()
         self._scrollbar_hidden = False
 
-    def _cancel_current_worker(self):
-        """取消当前正在运行的工作线程，断开所有信号连接"""
-        if self._current_worker:
-            # 先断开所有可能的信号连接，防止旧 worker 的残留信号干扰新任务
-            for signal_name in ('chunk_received', 'translation_finished', 'translation_error',
-                                'polishing_finished', 'polishing_error',
-                                'summarize_finished', 'summarize_error'):
-                try:
-                    getattr(self._current_worker, signal_name).disconnect()
-                except (TypeError, RuntimeError, AttributeError):
-                    pass
-            if self._current_worker.isRunning():
-                self._current_worker.cancel()
-                # 短暂等待，不阻塞 UI；旧线程会在检测到取消标志后自行退出
-                self._current_worker.wait(100)
-            self._current_worker = None
-
     def _start_translation(self):
         """开始翻译"""
         text = self._input_text.toPlainText().strip()
@@ -1474,7 +1432,10 @@ class TranslatorWindow(QWidget):
             return
 
         # 取消之前的翻译
-        self._cancel_current_worker()
+        if self._current_worker and self._current_worker.isRunning():
+            self._current_worker.cancel()
+            self._current_worker.wait(1000)
+            self._current_worker = None
 
         # 清空输出
         self._output_text.clear()
@@ -1552,7 +1513,7 @@ class TranslatorWindow(QWidget):
             chars_to_insert = []
             for _ in range(batch_size):
                 if self._char_queue:
-                    chars_to_insert.append(self._char_queue.popleft())
+                    chars_to_insert.append(self._char_queue.pop(0))
                 else:
                     break
 
@@ -1680,7 +1641,10 @@ class TranslatorWindow(QWidget):
             return
 
         # 取消之前的任务
-        self._cancel_current_worker()
+        if self._current_worker and self._current_worker.isRunning():
+            self._current_worker.cancel()
+            self._current_worker.wait(1000)
+            self._current_worker = None
 
         # 清空输出
         self._output_text.clear()
@@ -1790,7 +1754,10 @@ class TranslatorWindow(QWidget):
             return
 
         # 取消之前的任务
-        self._cancel_current_worker()
+        if self._current_worker and self._current_worker.isRunning():
+            self._current_worker.cancel()
+            self._current_worker.wait(1000)
+            self._current_worker = None
 
         # 清空输出
         self._output_text.clear()
@@ -2237,6 +2204,15 @@ class TranslatorWindow(QWidget):
 
     def closeEvent(self, event):
         """窗口关闭事件"""
+        if self._current_worker and self._current_worker.isRunning():
+            self._current_worker.cancel()
+            self._current_worker.wait(1000)
+            self._current_worker = None
+
+        # 重置自动翻译模式
+        self._auto_mode = False
+        self._pending_original_text = ""
+
         event.ignore()
         self.hide()
 
@@ -2961,26 +2937,6 @@ class TranslatorWindow(QWidget):
         # 记忆窗口位置：在隐藏前保存当前位置
         if self._remember_window_position:
             self._saved_window_pos = self.pos()
-
-        # 停止一切正在进行的翻译任务
-        self._cancel_current_worker()
-        self._char_timer.stop()
-        self._char_queue.clear()
-        self._pending_finish_callback = None
-        self._is_streaming = False
-
-        # 停止分隔线动画
-        self._splitter.stop_animation()
-
-        # 清空内容
-        self._input_text.clear()
-        self._output_text.clear()
-        self._streaming_text = ""
-
-        # 恢复按钮状态
-        self._translate_btn.setEnabled(True)
-        self._polishing_btn.setEnabled(True)
-        self._summarize_btn.setEnabled(True)
 
         # 重置自动翻译模式状态
         self._auto_mode = False

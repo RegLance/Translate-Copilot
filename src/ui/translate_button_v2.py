@@ -29,7 +29,7 @@ except ImportError:
 
 # 按钮基础尺寸（逻辑像素，100% DPI 下的大小）
 # Windows 分支会按实际 DPI 缩放到物理像素再绘制。
-BUTTON_SIZE = 28
+BUTTON_SIZE = 24
 
 # 鼠标离开按钮多少像素后自动隐藏（使用逻辑坐标）
 HIDE_DISTANCE_THRESHOLD = 50
@@ -227,6 +227,11 @@ if sys.platform == 'win32':
 
         Qt 的 Format_ARGB32_Premultiplied 在小端架构（x86/x64）上
         内存布局刚好就是 B, G, R, A —— 正是 UpdateLayeredWindow 要的格式。
+
+        注意：WS_EX_LAYERED 窗口使用 UpdateLayeredWindow 时，Windows 根据
+        alpha 通道做 hit-test —— alpha=0 的像素鼠标事件会穿透。
+        为保证整个图标区域都可点击（包括透明部分如字母空洞、圆角外围），
+        将 alpha=0 的像素改为 alpha=1（肉眼不可见但 hit-test 可通过）。
         """
         img = QImage(icon_path)
         if img.isNull():
@@ -238,7 +243,12 @@ if sys.platform == 'win32':
         ).convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
         bits = img.constBits()
         bits.setsize(img.sizeInBytes())
-        return bytes(bits)
+        data = bytearray(bits)
+        # BGRA 格式：每 4 字节 [B, G, R, A]，将 alpha=0 改为 alpha=1
+        for i in range(3, len(data), 4):
+            if data[i] == 0:
+                data[i] = 1
+        return bytes(data)
 
     class TranslateButton(QObject):
         """翻译图标按钮（UpdateLayeredWindow + DPI-aware 定位）

@@ -110,9 +110,13 @@ class StyledSpinBox(QSpinBox):
         if up_rect.contains(event.pos()):
             self._up_pressed = True
             self.stepUp()
+            self.update()
+            return  # 已手动处理，不再调用 super 避免重复步进
         elif down_rect.contains(event.pos()):
             self._down_pressed = True
             self.stepDown()
+            self.update()
+            return  # 已手动处理，不再调用 super 避免重复步进
 
         super().mousePressEvent(event)
         self.update()
@@ -647,6 +651,17 @@ class SettingsDialog(QDialog):
         self._remember_position_hint_label.setWordWrap(True)
         translator_window_layout.addWidget(self._remember_position_hint_label)
 
+        # 始终置顶勾选框
+        self._always_on_top_check = QCheckBox("始终置顶")
+        self._always_on_top_check.toggled.connect(self._on_checkbox_toggled)
+        translator_window_layout.addWidget(self._always_on_top_check)
+
+        # 添加说明文字
+        self._always_on_top_hint_label = QLabel("勾选后，翻译窗口始终显示在所有窗口最上层。不勾选时，窗口可被其他窗口覆盖，通过快捷键、双击托盘图标或点击任务栏图标可重新唤醒")
+        self._always_on_top_hint_label.setProperty("class", "hint")
+        self._always_on_top_hint_label.setWordWrap(True)
+        translator_window_layout.addWidget(self._always_on_top_hint_label)
+
         scroll_layout.addWidget(self._translator_window_group)
 
         # 系统设置组
@@ -978,7 +993,8 @@ class SettingsDialog(QDialog):
         self._cached_check_icon = self._create_check_icon()
         self._cached_uncheck_icon = self._create_uncheck_icon()
         for cb in (self._auto_start_check, self._keep_original_check,
-                   self._fixed_height_check, self._remember_position_check):
+                   self._fixed_height_check, self._remember_position_check,
+                   self._always_on_top_check):
             cb.setIcon(self._cached_check_icon if cb.isChecked() else self._cached_uncheck_icon)
 
     def _start_hotkey_capture(self, target: str):
@@ -1165,6 +1181,10 @@ class SettingsDialog(QDialog):
         remember_position = self._config.get('translator_window.remember_window_position', False)
         self._remember_position_check.setChecked(remember_position)
 
+        # 始终置顶选项
+        always_on_top = self._config.get('translator_window.always_on_top', False)
+        self._always_on_top_check.setChecked(always_on_top)
+
         self._auto_start_check.setChecked(self._config.get('startup.auto_start', False))
 
         # 禁用滚轮事件，避免误触
@@ -1282,6 +1302,10 @@ class SettingsDialog(QDialog):
             # 翻译窗口记忆位置
             remember_position = self._remember_position_check.isChecked()
             self._config.set('translator_window.remember_window_position', remember_position)
+
+            # 翻译窗口始终置顶
+            always_on_top = self._always_on_top_check.isChecked()
+            self._config.set('translator_window.always_on_top', always_on_top)
 
             auto_start = self._auto_start_check.isChecked()
             self._config.set('startup.auto_start', auto_start)
@@ -1812,8 +1836,14 @@ class MainController(QObject):
         """热键触发时显示/隐藏翻译窗口（实现切换功能）"""
         log_debug("热键触发")
 
-        # 如果翻译窗口已经可见，则隐藏它
+        # 如果翻译窗口已经可见且未最小化
         if self._translator_window.isVisible() and not self._translator_window.is_minimized():
+            # 非置顶模式下，窗口可能被其他窗口覆盖
+            # 如果窗口不在前台（未激活），则唤醒到前台而非隐藏
+            if not self._translator_window._always_on_top and not self._translator_window.is_foreground:
+                log_debug("翻译窗口被覆盖，唤醒到前台")
+                self._translator_window.bring_to_front()
+                return
             log_debug("翻译窗口已可见，隐藏窗口")
             self._translator_window.hide()
             self._last_text = ""
@@ -2076,14 +2106,17 @@ class MainController(QObject):
         dialog.exec()
 
     def _on_translator_window_requested(self):
-        """双击托盘显示翻译窗口"""
+        """双击托盘或点击菜单显示翻译窗口"""
         # 先隐藏划词翻译相关窗口
-        self._translator_window.hide()
         self._translate_button.hide()
         self._last_text = ""
 
-        # 显示翻译窗口
-        self._translator_window.show_window()
+        # 如果窗口已可见，唤醒到前台
+        if self._translator_window.isVisible() and not self._translator_window.is_minimized():
+            self._translator_window.bring_to_front()
+        else:
+            # 显示翻译窗口
+            self._translator_window.show_window()
 
     def _on_history_requested(self):
         """显示翻译历史窗口"""

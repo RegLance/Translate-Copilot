@@ -160,6 +160,7 @@ class Config:
             'translator_window': {
                 'fixed_height_mode': False,  # 固定高度模式（勾选后不自动调整窗口高度）
                 'remember_window_position': False,  # 记忆窗口位置（勾选后记住窗口关闭时的位置）
+                'always_on_top': False,  # 始终置顶（勾选后翻译窗口始终在最顶层）
             },
             'selection': {
                 'browser_delay_ms': 450,  # 浏览器环境下划词延迟（毫秒）

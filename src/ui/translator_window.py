@@ -350,6 +350,10 @@ class TranslatorWindow(QWidget):
     2. 划词自动翻译模式（自动填充原文并翻译）
     """
 
+    # CJK 字体回退链（中文、韩文、日文 + 通用 sans-serif）
+    _FONT_FAMILIES = ["Microsoft YaHei", "Malgun Gothic", "Yu Gothic UI", "Noto Sans CJK SC", "sans-serif"]
+    _FONT_FAMILY_CSS = '"Microsoft YaHei", "Malgun Gothic", "Yu Gothic UI", "Noto Sans CJK SC", sans-serif'
+
     # 信号
     closed = pyqtSignal()
     translation_completed = pyqtSignal(str, str)  # 原文, 译文 - 翻译完成信号
@@ -410,15 +414,25 @@ class TranslatorWindow(QWidget):
         self._remember_window_position = get_config().get('translator_window.remember_window_position', False)
         self._saved_window_pos = None  # 保存的窗口位置 (QPoint)
 
+        # 始终置顶（从配置读取）
+        self._always_on_top = get_config().get('translator_window.always_on_top', False)
+
         self._setup_window_properties()
         self._setup_ui()
 
+    def _create_text_font(self) -> QFont:
+        """创建支持中日韩多语言的文本字体"""
+        font = QFont()
+        font.setFamilies(self._FONT_FAMILIES)
+        font.setPointSize(self._font_size)
+        return font
+
     def _setup_window_properties(self):
         """设置窗口属性"""
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
+        flags = Qt.WindowType.FramelessWindowHint
+        if self._always_on_top:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         # 窗口最小高度计算：
@@ -784,7 +798,7 @@ class TranslatorWindow(QWidget):
         # 固定高度模式下原文框高度为180px，否则为120px
         input_min_height = 180 if self._fixed_height_mode else 120
         self._input_text.setMinimumHeight(input_min_height)
-        self._input_text.setFont(QFont("Microsoft YaHei", self._font_size))
+        self._input_text.setFont(self._create_text_font())
         self._input_text.setStyleSheet(f"""
             QTextEdit {{
                 background-color: {theme['bg_secondary']};
@@ -792,6 +806,7 @@ class TranslatorWindow(QWidget):
                 border: 1px solid {theme['border_color']};
                 border-radius: 4px;
                 padding: 8px;
+                font-family: {self._FONT_FAMILY_CSS};
                 font-size: {self._font_size}px;
             }}
             QTextEdit:focus {{
@@ -823,7 +838,7 @@ class TranslatorWindow(QWidget):
         self._output_text = QTextEdit()
         self._output_text.setParent(self._output_container)
         self._output_text.setReadOnly(True)
-        self._output_text.setFont(QFont("Microsoft YaHei", self._font_size))
+        self._output_text.setFont(self._create_text_font())
         self._output_text.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse |
             Qt.TextInteractionFlag.TextSelectableByKeyboard
@@ -836,6 +851,7 @@ class TranslatorWindow(QWidget):
                 border: none;
                 border-radius: 4px;
                 padding: 8px;
+                font-family: {self._FONT_FAMILY_CSS};
                 font-size: {self._font_size}px;
             }}
             {get_scrollbar_style(theme)}
@@ -941,6 +957,82 @@ class TranslatorWindow(QWidget):
         self.raise_()
         self.activateWindow()
 
+    def _update_always_on_top(self):
+        """动态切换窗口置顶属性（运行时配置变更时调用）"""
+        was_visible = self.isVisible()
+        flags = Qt.WindowType.FramelessWindowHint
+        if self._always_on_top:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+        # setWindowFlags 会隐藏窗口，需要重新显示
+        if was_visible:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+        # 重新设置任务栏最小化支持（setWindowFlags 会重置 Win32 样式）
+        self._enable_taskbar_minimize()
+
+    @property
+    def is_foreground(self) -> bool:
+        """使用 Win32 API 精确检测窗口是否为当前前台窗口"""
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                hwnd = int(self.winId())
+                foreground_hwnd = ctypes.windll.user32.GetForegroundWindow()
+                return hwnd == foreground_hwnd
+            except Exception:
+                pass
+        return self.isActiveWindow()
+
+    def bring_to_front(self):
+        """将窗口唤醒到最顶层（使用 Win32 API 确保可靠地获取前台焦点）"""
+        if self.isMinimized():
+            self.restore_from_minimized()
+            return
+
+        if not self.isVisible():
+            self.show_window()
+            return
+
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                hwnd = int(self.winId())
+                user32 = ctypes.windll.user32
+
+                # 获取当前前台窗口的线程 ID
+                foreground_hwnd = user32.GetForegroundWindow()
+                foreground_tid = user32.GetWindowThreadProcessId(foreground_hwnd, None)
+                # 获取当前线程 ID
+                current_tid = ctypes.windll.kernel32.GetCurrentThreadId()
+
+                # AttachThreadInput 技巧：将本线程的输入处理关联到前台窗口线程
+                # 这样 SetForegroundWindow 才能可靠地将窗口置前
+                attached = False
+                if foreground_tid != current_tid:
+                    attached = user32.AttachThreadInput(current_tid, foreground_tid, True)
+
+                if not self._always_on_top:
+                    # 非置顶模式：先 TOPMOST 再 NOTOPMOST，窗口拉到最前但不保持置顶
+                    SWP_NOMOVE = 0x0002
+                    SWP_NOSIZE = 0x0001
+                    SWP_SHOWWINDOW = 0x0040
+                    swp_flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
+                    user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, swp_flags)   # HWND_TOPMOST
+                    user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, swp_flags)   # HWND_NOTOPMOST
+
+                user32.SetForegroundWindow(hwnd)
+                user32.BringWindowToTop(hwnd)
+
+                if attached:
+                    user32.AttachThreadInput(current_tid, foreground_tid, False)
+            except Exception:
+                pass
+
+        self.raise_()
+        self.activateWindow()
+
     def _on_maximize(self):
         """最大化/还原窗口"""
         if self._is_maximized:
@@ -975,6 +1067,12 @@ class TranslatorWindow(QWidget):
         self._remember_window_position = get_config().get('translator_window.remember_window_position', False)
         if not self._remember_window_position:
             self._saved_window_pos = None
+
+        # 同步始终置顶配置
+        new_always_on_top = get_config().get('translator_window.always_on_top', False)
+        if new_always_on_top != self._always_on_top:
+            self._always_on_top = new_always_on_top
+            self._update_always_on_top()
 
         # 检查是否需要更新固定高度模式
         if new_fixed_height_mode != self._fixed_height_mode:
@@ -1164,7 +1262,7 @@ class TranslatorWindow(QWidget):
         self._splitter.set_theme_colors(base_color, accent_color)
 
         # 更新输入框
-        self._input_text.setFont(QFont("Microsoft YaHei", self._font_size))
+        self._input_text.setFont(self._create_text_font())
         self._input_text.setStyleSheet(f"""
             QTextEdit {{
                 background-color: {theme['bg_secondary']};
@@ -1172,6 +1270,7 @@ class TranslatorWindow(QWidget):
                 border: 1px solid {theme['border_color']};
                 border-radius: 4px;
                 padding: 8px;
+                font-family: {self._FONT_FAMILY_CSS};
                 font-size: {self._font_size}px;
             }}
             QTextEdit:focus {{
@@ -1190,7 +1289,7 @@ class TranslatorWindow(QWidget):
         """)
 
         # 更新输出框
-        self._output_text.setFont(QFont("Microsoft YaHei", self._font_size))
+        self._output_text.setFont(self._create_text_font())
         self._output_text.setStyleSheet(f"""
             QTextEdit {{
                 background-color: transparent;
@@ -1198,6 +1297,7 @@ class TranslatorWindow(QWidget):
                 border: none;
                 border-radius: 4px;
                 padding: 8px;
+                font-family: {self._FONT_FAMILY_CSS};
                 font-size: {self._font_size}px;
             }}
             {get_scrollbar_style(theme)}
@@ -2861,6 +2961,7 @@ class TranslatorWindow(QWidget):
                     border: none;
                     border-radius: 4px;
                     padding: 8px;
+                    font-family: {self._FONT_FAMILY_CSS};
                     font-size: {self._font_size}px;
                 }}
                 {get_hidden_scrollbar_style(theme)}
@@ -2883,6 +2984,7 @@ class TranslatorWindow(QWidget):
                     border: none;
                     border-radius: 4px;
                     padding: 8px;
+                    font-family: {self._FONT_FAMILY_CSS};
                     font-size: {self._font_size}px;
                 }}
                 {get_scrollbar_style(theme)}

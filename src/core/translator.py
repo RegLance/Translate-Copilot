@@ -170,16 +170,16 @@ class Translator:
                 stream=True,
             )
 
-            chunks = []
+            full_text = ""
             for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     content = chunk.choices[0].delta.content
-                    chunks.append(content)
+                    full_text += content
                     if on_chunk:
                         on_chunk(content)
                     yield content
 
-            return "".join(chunks)
+            return full_text
 
         except Exception as e:
             error_msg = self._classify_error(e, error_prefix)

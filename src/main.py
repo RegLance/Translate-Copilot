@@ -424,7 +424,7 @@ class SettingsDialog(QDialog):
         # 关闭按钮
         self._close_btn = QPushButton("×")
         self._close_btn.setObjectName("closeBtn")
-        self._close_btn.setFixedSize(20, 20)
+        self._close_btn.setFixedSize(22, 22)
         self._close_btn.clicked.connect(self.reject)
         title_layout.addWidget(self._close_btn)
 
@@ -769,9 +769,10 @@ class SettingsDialog(QDialog):
                 background-color: transparent;
                 color: {t['text_muted']};
                 border: none;
-                border-radius: 10px;
+                border-radius: 11px;
                 font-size: 14px;
                 font-weight: bold;
+                padding-bottom: 1px;
             }}
             QPushButton#closeBtn:hover {{
                 background-color: {t['close_hover']};

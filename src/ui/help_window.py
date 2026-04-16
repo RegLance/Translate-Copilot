@@ -5,15 +5,18 @@ from PyQt6.QtWidgets import (
     QPushButton, QFrame, QGraphicsDropShadowEffect, QScrollArea,
     QTextEdit
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QColor, QCursor
+from PyQt6.QtCore import Qt, pyqtSignal, QUrl
+from PyQt6.QtGui import QFont, QColor, QCursor, QDesktopServices
 
 try:
-    from ..config import get_config, APP_NAME
+    from ..config import get_config, APP_NAME, APP_VERSION, BUILD_TIME
     from ..utils.theme import get_theme, get_scrollbar_style
 except ImportError:
-    from src.config import get_config, APP_NAME
+    from src.config import get_config, APP_NAME, APP_VERSION, BUILD_TIME
     from src.utils.theme import get_theme, get_scrollbar_style
+
+# 联系我们网址
+CONTACT_URL = "https://github.com/sqag-team/qtranslator"
 
 
 class HelpWindow(QWidget):
@@ -102,18 +105,22 @@ class HelpWindow(QWidget):
 
         # 关闭按钮
         self._close_btn = QPushButton("×")
-        self._close_btn.setFixedSize(30, 30)
+        self._close_btn.setObjectName("closeBtn")
+        self._close_btn.setFixedSize(22, 22)
         self._close_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {theme['text_secondary']};
+            QPushButton#closeBtn {{
+                background-color: transparent;
+                color: {theme['text_muted']};
                 border: none;
-                font-size: 20px;
+                border-radius: 11px;
+                font-size: 14px;
                 font-weight: bold;
+                padding-bottom: 1px;
             }}
-            QPushButton:hover {{
-                color: {theme['close_hover']};
+            QPushButton#closeBtn:hover {{
+                background-color: {theme['close_hover']};
+                color: #ffffff;
             }}
         """)
         self._close_btn.clicked.connect(self.close)
@@ -123,6 +130,31 @@ class HelpWindow(QWidget):
         title_bar_layout.addWidget(self._close_btn)
 
         content_layout.addWidget(self._title_bar)
+
+        # 版本信息区域
+        self._version_frame = QFrame()
+        self._version_frame.setObjectName("versionFrame")
+        self._version_frame.setStyleSheet(f"""
+            QFrame#versionFrame {{
+                background-color: {theme['button_bg']};
+                border-radius: 8px;
+            }}
+        """)
+        version_layout = QVBoxLayout(self._version_frame)
+        version_layout.setContentsMargins(12, 10, 12, 10)
+        version_layout.setSpacing(4)
+
+        self._version_label = QLabel(f"v{APP_VERSION}  |  {BUILD_TIME}  |  by SQAG Team")
+        self._version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._version_label.setStyleSheet(f"""
+            color: {theme['text_primary']};
+            font-size: 14px;
+            font-weight: bold;
+            background: transparent;
+        """)
+        version_layout.addWidget(self._version_label)
+
+        content_layout.addWidget(self._version_frame)
 
         # 滚动区域
         self._scroll_area = QScrollArea()
@@ -209,6 +241,29 @@ class HelpWindow(QWidget):
         btn_layout = QHBoxLayout(self._btn_bar)
         btn_layout.setContentsMargins(0, 0, 0, 0)
 
+        # 联系我们按钮
+        self._contact_btn = QPushButton("联系我们")
+        self._contact_btn.setObjectName("contactBtn")
+        self._contact_btn.setFixedSize(100, 36)
+        self._contact_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._contact_btn.setStyleSheet(f"""
+            QPushButton#contactBtn {{
+                background-color: transparent;
+                color: {theme['text_secondary']};
+                border: 1px solid {theme['border_color']};
+                border-radius: 6px;
+                font-size: 14px;
+            }}
+            QPushButton#contactBtn:hover {{
+                background-color: {theme['button_bg']};
+                color: {theme['text_primary']};
+            }}
+        """)
+        self._contact_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(CONTACT_URL))
+        )
+        btn_layout.addWidget(self._contact_btn)
+
         btn_layout.addStretch()
 
         self._ok_btn = QPushButton("知道了")
@@ -288,16 +343,33 @@ class HelpWindow(QWidget):
 
         # 更新关闭按钮
         self._close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {theme['text_secondary']};
+            QPushButton#closeBtn {{
+                background-color: transparent;
+                color: {theme['text_muted']};
                 border: none;
-                font-size: 20px;
+                border-radius: 11px;
+                font-size: 14px;
                 font-weight: bold;
+                padding-bottom: 1px;
             }}
-            QPushButton:hover {{
-                color: {theme['close_hover']};
+            QPushButton#closeBtn:hover {{
+                background-color: {theme['close_hover']};
+                color: #ffffff;
             }}
+        """)
+
+        # 更新版本信息区域
+        self._version_frame.setStyleSheet(f"""
+            QFrame#versionFrame {{
+                background-color: {theme['button_bg']};
+                border-radius: 8px;
+            }}
+        """)
+        self._version_label.setStyleSheet(f"""
+            color: {theme['text_primary']};
+            font-size: 14px;
+            font-weight: bold;
+            background: transparent;
         """)
 
         # 更新滚动区域
@@ -320,6 +392,21 @@ class HelpWindow(QWidget):
             }}
             QPushButton:hover {{
                 background-color: {theme['button_hover']};
+            }}
+        """)
+
+        # 更新联系我们按钮
+        self._contact_btn.setStyleSheet(f"""
+            QPushButton#contactBtn {{
+                background-color: transparent;
+                color: {theme['text_secondary']};
+                border: 1px solid {theme['border_color']};
+                border-radius: 6px;
+                font-size: 14px;
+            }}
+            QPushButton#contactBtn:hover {{
+                background-color: {theme['button_bg']};
+                color: {theme['text_primary']};
             }}
         """)
 

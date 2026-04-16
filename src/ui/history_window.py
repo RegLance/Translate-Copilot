@@ -67,12 +67,6 @@ class HistoryWindow(QWidget):
         # 设置窗口图标（任务栏图标）
         self._set_window_icon()
 
-    def _set_window_icon(self):
-        """设置窗口图标（任务栏图标）"""
-        icon_path = Path(__file__).parent.parent.parent / "assets" / "icon.png"
-        if icon_path.exists():
-            self.setWindowIcon(QIcon(str(icon_path)))
-
         self._history = get_history()
         self._setup_ui()
         self._load_history()
@@ -83,6 +77,14 @@ class HistoryWindow(QWidget):
         except ImportError:
             from src.utils.theme import get_theme_manager
         get_theme_manager().theme_changed.connect(self.update_theme)
+
+    def _set_window_icon(self):
+        """设置窗口图标（任务栏图标）"""
+        icon_path = Path(__file__).parent.parent.parent / "assets" / "icon.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+
+    def _setup_ui(self):
         """设置UI"""
         theme = get_theme(self._theme_style)
 
@@ -166,14 +168,14 @@ class HistoryWindow(QWidget):
         # 最小化按钮
         self._minimize_btn = QPushButton("─")
         self._minimize_btn.setObjectName("minimizeBtn")
-        self._minimize_btn.setFixedSize(20, 20)
+        self._minimize_btn.setFixedSize(22, 22)
         self._minimize_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._minimize_btn.setStyleSheet(f"""
             QPushButton#minimizeBtn {{
                 background-color: transparent;
                 color: {theme['text_muted']};
                 border: none;
-                border-radius: 10px;
+                border-radius: 11px;
                 font-size: 10px;
                 font-weight: bold;
             }}
@@ -188,16 +190,17 @@ class HistoryWindow(QWidget):
         # 最大化按钮
         self._maximize_btn = QPushButton("□")
         self._maximize_btn.setObjectName("maximizeBtn")
-        self._maximize_btn.setFixedSize(20, 20)
+        self._maximize_btn.setFixedSize(22, 22)
         self._maximize_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._maximize_btn.setStyleSheet(f"""
             QPushButton#maximizeBtn {{
                 background-color: transparent;
                 color: {theme['text_muted']};
                 border: none;
-                border-radius: 10px;
+                border-radius: 11px;
                 font-size: 12px;
                 font-weight: bold;
+                padding-bottom: 2px;
             }}
             QPushButton#maximizeBtn:hover {{
                 background-color: {theme['button_hover']};
@@ -210,16 +213,17 @@ class HistoryWindow(QWidget):
         # 关闭按钮
         self._close_btn = QPushButton("×")
         self._close_btn.setObjectName("closeBtn")
-        self._close_btn.setFixedSize(20, 20)
+        self._close_btn.setFixedSize(22, 22)
         self._close_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._close_btn.setStyleSheet(f"""
             QPushButton#closeBtn {{
                 background-color: transparent;
                 color: {theme['text_muted']};
                 border: none;
-                border-radius: 10px;
+                border-radius: 11px;
                 font-size: 14px;
                 font-weight: bold;
+                padding-bottom: 1px;
             }}
             QPushButton#closeBtn:hover {{
                 background-color: {theme['close_hover']};
@@ -548,9 +552,10 @@ class HistoryWindow(QWidget):
                 background-color: transparent;
                 color: {theme['text_muted']};
                 border: none;
-                border-radius: 10px;
+                border-radius: 11px;
                 font-size: 14px;
                 font-weight: bold;
+                padding-bottom: 1px;
             }}
             QPushButton#closeBtn:hover {{
                 background-color: {theme['close_hover']};
@@ -564,7 +569,7 @@ class HistoryWindow(QWidget):
                 background-color: transparent;
                 color: {theme['text_muted']};
                 border: none;
-                border-radius: 10px;
+                border-radius: 11px;
                 font-size: 10px;
                 font-weight: bold;
             }}
@@ -580,9 +585,10 @@ class HistoryWindow(QWidget):
                 background-color: transparent;
                 color: {theme['text_muted']};
                 border: none;
-                border-radius: 10px;
+                border-radius: 11px;
                 font-size: 12px;
                 font-weight: bold;
+                padding-bottom: 2px;
             }}
             QPushButton#maximizeBtn:hover {{
                 background-color: {theme['button_hover']};

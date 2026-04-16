@@ -12,6 +12,8 @@ from datetime import datetime
 # 应用名称
 APP_NAME = "QTranslator"
 APP_ID = "com.qtranslator.app"
+APP_VERSION = "1.0.0"
+BUILD_TIME = "2026-04-16"
 
 
 def get_app_data_dir() -> Path:
@@ -128,9 +130,9 @@ class Config:
         """获取默认配置"""
         return {
             'translator': {
-                'api_key': 'sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',  # API Key
-                'base_url': 'https://api.openai.com/v1',  # API Base URL
-                'model': 'gpt-4o-mini',  # 模型名称
+                'api_key': 'EMPTY',  # API Key
+                'base_url': 'http://109.105.120.122:9003/v1',  # API Base URL
+                'model': 'qwenchat',  # 模型名称
                 'timeout': 60,  # 请求超时时间（秒）
                 'no_proxy': '',  # 不使用代理的地址，多个用逗号分隔
             },

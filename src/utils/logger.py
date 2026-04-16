@@ -2,7 +2,7 @@
 import sys
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 try:
@@ -117,7 +117,7 @@ class Logger:
     def clear_old_logs(self, days: int = 7):
         """清理旧日志文件"""
         try:
-            cutoff_date = datetime.now() - datetime.timedelta(days=days)
+            cutoff_date = datetime.now() - timedelta(days=days)
             for log_file in self._log_dir.glob("*.log"):
                 try:
                     date_str = log_file.stem  # 文件名格式: YYYY-MM-DD.log
@@ -131,16 +131,9 @@ class Logger:
             self.error(f"清理日志失败: {e}")
 
 
-# 全局日志实例
-_logger_instance: Optional[Logger] = None
-
-
 def get_logger() -> Logger:
     """获取全局日志实例"""
-    global _logger_instance
-    if _logger_instance is None:
-        _logger_instance = Logger()
-    return _logger_instance
+    return Logger.get_instance()
 
 
 def log_debug(msg: str):

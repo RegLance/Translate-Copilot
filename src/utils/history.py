@@ -1,5 +1,6 @@
 """翻译历史模块 - 保存和管理翻译历史记录"""
 import json
+import threading
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -49,6 +50,10 @@ class TranslationHistory:
         # 确保目录存在
         self._history_dir.mkdir(parents=True, exist_ok=True)
         
+        # 防抖保存定时器
+        self._save_timer: Optional[threading.Timer] = None
+        self._save_lock = threading.Lock()
+        
         # 加载历史记录
         self._history: List[HistoryItem] = self._load_history()
         
@@ -75,7 +80,16 @@ class TranslationHistory:
             return []
     
     def _save_history(self):
-        """保存历史记录"""
+        """防抖保存历史记录（延迟 1.5 秒写盘，连续调用只触发一次）"""
+        with self._save_lock:
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+            self._save_timer = threading.Timer(1.5, self._do_save)
+            self._save_timer.daemon = True
+            self._save_timer.start()
+
+    def _do_save(self):
+        """实际执行保存"""
         try:
             data = [item.to_dict() for item in self._history]
             with open(self._history_file, 'w', encoding='utf-8') as f:
@@ -83,6 +97,14 @@ class TranslationHistory:
             log_debug(f"翻译历史已保存，共 {len(self._history)} 条记录")
         except Exception as e:
             log_error(f"保存翻译历史失败: {e}")
+
+    def flush(self):
+        """立即保存（用于应用退出前确保数据不丢失）"""
+        with self._save_lock:
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+                self._save_timer = None
+        self._do_save()
     
     def add_record(self, original_text: str, translated_text: str,
                    target_language: str, source: str = "selection") -> HistoryItem:
@@ -165,7 +187,7 @@ class TranslationHistory:
         for i, item in enumerate(self._history):
             if item.id == id_str:
                 self._history.pop(i)
-                self._save_history()
+                self.flush()
                 log_info(f"删除翻译历史: {id_str}")
                 return True
         return False
@@ -173,7 +195,7 @@ class TranslationHistory:
     def clear_history(self):
         """清空所有历史记录"""
         self._history.clear()
-        self._save_history()
+        self.flush()
         log_info("翻译历史已清空")
     
     def get_recent_languages(self) -> List[str]:

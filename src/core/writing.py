@@ -387,6 +387,10 @@ Requirements:
             self._current_thread.join(timeout=2.0)
         self._is_writing = False
 
+    def reinitialize(self):
+        """重新初始化服务（配置变更后调用）"""
+        self._load_api_config()
+
     @property
     def is_writing(self) -> bool:
         """是否正在写作"""

@@ -77,7 +77,12 @@ class HistoryWindow(QWidget):
         self._setup_ui()
         self._load_history()
 
-    def _setup_ui(self):
+        # 连接主题变更信号
+        try:
+            from ..utils.theme import get_theme_manager
+        except ImportError:
+            from src.utils.theme import get_theme_manager
+        get_theme_manager().theme_changed.connect(self.update_theme)
         """设置UI"""
         theme = get_theme(self._theme_style)
 

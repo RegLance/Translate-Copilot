@@ -2,7 +2,8 @@
 import hashlib
 import threading
 import traceback
-from typing import Optional, Dict, Generator, Callable
+from collections import OrderedDict
+from typing import Optional, Dict, Generator, Callable, Tuple
 from dataclasses import dataclass
 import sys
 from pathlib import Path
@@ -33,13 +34,7 @@ _language_detect_lock = threading.Lock()
 def _log_crash_safe(message: str, exc: Exception = None):
     """安全地记录崩溃日志"""
     try:
-        # 获取崩溃日志路径
-        if sys.platform == 'win32':
-            import os
-            base_dir = Path(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')))
-        else:
-            base_dir = Path.home()
-        crash_path = base_dir / "QTranslator" / "crash.log"
+        crash_path = get_config().crash_log_path
         crash_path.parent.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -67,10 +62,12 @@ class TranslationResult:
 class Translator:
     """翻译服务类"""
 
+    MAX_CACHE_SIZE = 500  # 缓存最大条目数
+
     def __init__(self):
         """初始化翻译服务"""
         self._client: Optional[OpenAI] = None
-        self._cache: Dict[str, TranslationResult] = {}
+        self._cache: OrderedDict[str, TranslationResult] = OrderedDict()
         self._last_error: Optional[str] = None
         self._load_api_config()
         self._init_client()
@@ -116,6 +113,98 @@ class Translator:
     def _get_cache_key(self, text: str, target_language: str, source_language: str = None) -> str:
         """生成缓存键"""
         return hashlib.md5(f"{text}:{source_language}:{target_language}".encode()).hexdigest()
+
+    def _put_cache(self, key: str, result: TranslationResult):
+        """存入缓存（LRU 淘汰策略）"""
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        self._cache[key] = result
+        while len(self._cache) > self.MAX_CACHE_SIZE:
+            self._cache.popitem(last=False)
+
+    def _ensure_client(self) -> bool:
+        """确保客户端可用，返回是否成功"""
+        if self._client is None:
+            self._init_client()
+        return self._client is not None
+
+    @staticmethod
+    def _classify_error(e: Exception, fallback_prefix: str = "操作失败") -> str:
+        """将异常分类为用户友好的错误消息"""
+        error_msg = str(e)
+        if "api_key" in error_msg.lower() or "401" in error_msg:
+            return "API Key 无效或未配置"
+        elif "404" in error_msg:
+            return "API URL 无效或模型不存在，请检查 Base URL 和 Model 配置"
+        elif "rate_limit" in error_msg.lower() or "429" in error_msg:
+            return "请求过于频繁，请稍后重试"
+        elif "connection" in error_msg.lower() or "timeout" in error_msg.lower():
+            return "网络连接失败或超时，请检查网络"
+        elif "model" in error_msg.lower():
+            return "模型不存在或不可用，请检查 Model 配置"
+        return f"{fallback_prefix}: {error_msg}"
+
+    def _stream_request(self, system_prompt: str, user_prompt: str,
+                        on_chunk: Callable[[str], None] = None,
+                        error_prefix: str = "操作失败") -> Generator[str, None, str]:
+        """通用流式请求（客户端检查、流式迭代、错误分类）
+        
+        Yields:
+            str: 流式文本片段
+            
+        Returns:
+            str: 完整文本（通过 generator 的 return value）
+        """
+        if not self._ensure_client():
+            yield "[错误: API 客户端初始化失败]"
+            return ""
+
+        try:
+            stream = self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0,
+                stream=True,
+            )
+
+            chunks = []
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    chunks.append(content)
+                    if on_chunk:
+                        on_chunk(content)
+                    yield content
+
+            return "".join(chunks)
+
+        except Exception as e:
+            error_msg = self._classify_error(e, error_prefix)
+            self._last_error = error_msg
+            yield f"[错误: {error_msg}]"
+            return ""
+
+    def _resolve_language_and_prompt(self, text: str, target_language: str = None,
+                                      auto_detect: bool = True) -> Tuple[str, str, str, str, str]:
+        """解析语言方向并构建 prompt
+        
+        Returns:
+            tuple: (system_prompt, user_prompt, cache_key, source_lang, target_lang)
+        """
+        if auto_detect and target_language is None:
+            source_lang, target_lang, source_code = get_translation_direction(text)
+        else:
+            if target_language is None:
+                target_language = get_config().target_language
+            source_code, source_lang = detect_language(text)
+            target_lang = target_language
+
+        system_prompt, user_prompt = self._build_translation_prompt(text, source_lang, target_lang)
+        cache_key = self._get_cache_key(text, target_lang, source_lang)
+        return system_prompt, user_prompt, cache_key, source_lang, target_lang
 
     def _build_translation_prompt(self, text: str, source_lang: str, target_lang: str) -> tuple:
         """构建翻译提示词（参考 nextai-translator）
@@ -256,46 +345,7 @@ Requirements:
 
         text = text.strip()
         system_prompt, user_prompt = self._build_polishing_prompt(text)
-
-        # 检查客户端
-        if self._client is None:
-            self._init_client()
-            if self._client is None:
-                yield "[错误: API 客户端初始化失败]"
-                return
-
-        try:
-            stream = self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0,
-                stream=True,
-            )
-
-            full_text = ""
-            for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    full_text += content
-                    if on_chunk:
-                        on_chunk(content)
-                    yield content
-
-        except Exception as e:
-            error_msg = str(e)
-            if "api_key" in error_msg.lower() or "401" in error_msg:
-                error_msg = "API Key 无效或未配置"
-            elif "rate_limit" in error_msg.lower() or "429" in error_msg:
-                error_msg = "请求过于频繁，请稍后重试"
-            elif "connection" in error_msg.lower():
-                error_msg = "网络连接失败"
-            else:
-                error_msg = f"润色失败: {error_msg}"
-
-            yield f"[错误: {error_msg}]"
+        yield from self._stream_request(system_prompt, user_prompt, on_chunk, "润色失败")
 
     def summarize_stream(self, text: str, target_language: str = "中文",
                          on_chunk: Callable[[str], None] = None) -> Generator[str, None, None]:
@@ -315,46 +365,7 @@ Requirements:
 
         text = text.strip()
         system_prompt, user_prompt = self._build_summarize_prompt(text, target_language)
-
-        # 检查客户端
-        if self._client is None:
-            self._init_client()
-            if self._client is None:
-                yield "[错误: API 客户端初始化失败]"
-                return
-
-        try:
-            stream = self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0,
-                stream=True,
-            )
-
-            full_text = ""
-            for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    full_text += content
-                    if on_chunk:
-                        on_chunk(content)
-                    yield content
-
-        except Exception as e:
-            error_msg = str(e)
-            if "api_key" in error_msg.lower() or "401" in error_msg:
-                error_msg = "API Key 无效或未配置"
-            elif "rate_limit" in error_msg.lower() or "429" in error_msg:
-                error_msg = "请求过于频繁，请稍后重试"
-            elif "connection" in error_msg.lower():
-                error_msg = "网络连接失败"
-            else:
-                error_msg = f"总结失败: {error_msg}"
-
-            yield f"[错误: {error_msg}]"
+        yield from self._stream_request(system_prompt, user_prompt, on_chunk, "总结失败")
 
     def translate_stream(self, text: str, target_language: str = None,
                          on_chunk: Callable[[str], None] = None,
@@ -375,86 +386,31 @@ Requirements:
             return
 
         text = text.strip()
-        
-        # 智能检测语言并确定翻译方向
-        if auto_detect and target_language is None:
-            source_lang, target_lang, source_code = get_translation_direction(text)
-            system_prompt, user_prompt = self._build_translation_prompt(text, source_lang, target_lang)
-            cache_key = self._get_cache_key(text, target_lang, source_lang)
-        else:
-            # 使用指定的目标语言
-            if target_language is None:
-                target_language = get_config().target_language
-            
-            # 检测源语言
-            source_code, source_lang = detect_language(text)
-            system_prompt, user_prompt = self._build_translation_prompt(text, source_lang, target_language)
-            cache_key = self._get_cache_key(text, target_language, source_lang)
-            target_lang = target_language
+        system_prompt, user_prompt, cache_key, source_lang, target_lang = \
+            self._resolve_language_and_prompt(text, target_language, auto_detect)
 
         # 检查缓存
         if cache_key in self._cache:
-            cached_result = self._cache[cache_key].translated_text
-            yield cached_result
+            self._cache.move_to_end(cache_key)
+            yield self._cache[cache_key].translated_text
             return
 
-        # 检查客户端
-        if self._client is None:
-            self._init_client()
-            if self._client is None:
-                yield "[错误: API 客户端初始化失败]"
-                return
+        # 执行流式请求
+        full_text_chunks = []
+        for content in self._stream_request(system_prompt, user_prompt, on_chunk, "翻译失败"):
+            full_text_chunks.append(content)
+            yield content
 
-        try:
-            stream = self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0,
-                stream=True,
-            )
-
-            full_text = ""
-            for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    full_text += content
-                    if on_chunk:
-                        on_chunk(content)
-                    yield content
-
-            # 存入缓存
+        # 存入缓存（仅在成功时）
+        full_text = "".join(full_text_chunks)
+        if full_text and not full_text.startswith("[错误:"):
             result = TranslationResult(
                 original_text=text,
                 translated_text=full_text.strip(),
                 source_language=source_lang,
                 target_language=target_lang
             )
-            self._cache[cache_key] = result
-
-        except Exception as e:
-            # 记录崩溃日志
-            _log_crash_safe(f"流式翻译失败 (model={self._model})", e)
-
-            error_msg = str(e)
-            # 识别常见错误类型并给出友好提示
-            if "api_key" in error_msg.lower() or "401" in error_msg:
-                error_msg = "API Key 无效或未配置"
-            elif "404" in error_msg:
-                error_msg = "API URL 无效或模型不存在，请检查 Base URL 和 Model 配置"
-            elif "rate_limit" in error_msg.lower() or "429" in error_msg:
-                error_msg = "请求过于频繁，请稍后重试"
-            elif "connection" in error_msg.lower() or "timeout" in error_msg.lower():
-                error_msg = "网络连接失败或超时，请检查网络"
-            elif "model" in error_msg.lower():
-                error_msg = "模型不存在或不可用，请检查 Model 配置"
-            else:
-                error_msg = f"翻译失败: {error_msg}"
-
-            self._last_error = error_msg
-            yield f"[错误: {error_msg}]"
+            self._put_cache(cache_key, result)
 
     def translate_sync(self, text: str, target_language: str = None,
                         auto_detect: bool = True) -> TranslationResult:
@@ -467,35 +423,22 @@ Requirements:
             )
 
         text = text.strip()
-        
-        # 智能检测语言并确定翻译方向
-        if auto_detect and target_language is None:
-            source_lang, target_lang, source_code = get_translation_direction(text)
-            system_prompt, user_prompt = self._build_translation_prompt(text, source_lang, target_lang)
-            cache_key = self._get_cache_key(text, target_lang, source_lang)
-        else:
-            if target_language is None:
-                target_language = get_config().target_language
-            
-            source_code, source_lang = detect_language(text)
-            system_prompt, user_prompt = self._build_translation_prompt(text, source_lang, target_language)
-            cache_key = self._get_cache_key(text, target_language, source_lang)
-            target_lang = target_language
+        system_prompt, user_prompt, cache_key, source_lang, target_lang = \
+            self._resolve_language_and_prompt(text, target_language, auto_detect)
 
         # 检查缓存
         if cache_key in self._cache:
+            self._cache.move_to_end(cache_key)
             return self._cache[cache_key]
 
         # 检查客户端
-        if self._client is None:
-            self._init_client()
-            if self._client is None:
-                return TranslationResult(
-                    original_text=text,
-                    translated_text="",
-                    error="API 客户端初始化失败",
-                    target_language=target_lang
-                )
+        if not self._ensure_client():
+            return TranslationResult(
+                original_text=text,
+                translated_text="",
+                error="API 客户端初始化失败",
+                target_language=target_lang
+            )
 
         try:
             response = self._client.chat.completions.create(
@@ -516,18 +459,11 @@ Requirements:
                 target_language=target_lang
             )
 
-            self._cache[cache_key] = result
+            self._put_cache(cache_key, result)
             return result
 
         except Exception as e:
-            error_msg = str(e)
-            if "api_key" in error_msg.lower() or "401" in error_msg:
-                error_msg = "API Key 无效或未配置"
-            elif "rate_limit" in error_msg.lower() or "429" in error_msg:
-                error_msg = "请求过于频繁，请稍后重试"
-            elif "connection" in error_msg.lower():
-                error_msg = "网络连接失败"
-
+            error_msg = self._classify_error(e, "翻译失败")
             return TranslationResult(
                 original_text=text,
                 translated_text="",

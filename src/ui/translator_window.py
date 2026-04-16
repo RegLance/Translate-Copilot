@@ -420,6 +420,13 @@ class TranslatorWindow(QWidget):
         self._setup_window_properties()
         self._setup_ui()
 
+        # 连接主题变更信号
+        try:
+            from ..utils.theme import get_theme_manager
+        except ImportError:
+            from src.utils.theme import get_theme_manager
+        get_theme_manager().theme_changed.connect(self.update_theme)
+
     def _create_text_font(self) -> QFont:
         """创建支持中日韩多语言的文本字体"""
         font = QFont()

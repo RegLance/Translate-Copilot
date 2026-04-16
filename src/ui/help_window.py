@@ -45,6 +45,13 @@ class HelpWindow(QWidget):
 
         self._setup_ui()
 
+        # 连接主题变更信号
+        try:
+            from ..utils.theme import get_theme_manager
+        except ImportError:
+            from src.utils.theme import get_theme_manager
+        get_theme_manager().theme_changed.connect(self.update_theme)
+
     def _setup_ui(self):
         """创建UI"""
         theme = get_theme(self._theme_style)

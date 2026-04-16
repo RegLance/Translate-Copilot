@@ -645,3 +645,37 @@ def get_hidden_scrollbar_style(theme: Dict[str, Any]) -> str:
             border: none;
         }}
     """
+
+
+# ---------------------------------------------------------------------------
+# 主题变更信号管理器
+# ---------------------------------------------------------------------------
+
+from PyQt6.QtCore import QObject, pyqtSignal
+from typing import Optional
+
+
+class ThemeManager(QObject):
+    """主题变更信号管理器（单例）
+    
+    各窗口通过 connect theme_changed 信号来自动响应主题切换，
+    无需在 SettingsDialog 中手动枚举每个窗口。
+    """
+    theme_changed = pyqtSignal()
+    
+    _instance: Optional['ThemeManager'] = None
+    
+    @classmethod
+    def instance(cls) -> 'ThemeManager':
+        if cls._instance is None:
+            cls._instance = ThemeManager()
+        return cls._instance
+    
+    def notify_theme_changed(self):
+        """发射主题变更信号"""
+        self.theme_changed.emit()
+
+
+def get_theme_manager() -> ThemeManager:
+    """获取全局主题管理器"""
+    return ThemeManager.instance()

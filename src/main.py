@@ -274,7 +274,6 @@ try:
     from .core.selection_detector import get_selection_detector
     from .core.translator import get_translator, reinitialize_translator
     from .core.writing import get_writing_service, WritingResult
-    from .ui.popup_window import get_popup_window
     from .ui.translate_button import get_translate_button
     from .ui.tray_icon import get_tray_icon
     from .ui.translator_window import get_translator_window
@@ -292,7 +291,6 @@ except ImportError:
     from src.core.selection_detector import get_selection_detector
     from src.core.translator import get_translator, reinitialize_translator
     from src.core.writing import get_writing_service, WritingResult
-    from src.ui.popup_window import get_popup_window
     from src.ui.translate_button import get_translate_button
     from src.ui.tray_icon import get_tray_icon
     from src.ui.translator_window import get_translator_window
@@ -342,7 +340,7 @@ def setup_auto_start(enable: bool):
 class SettingsDialog(QDialog):
     """设置对话框（无边框风格）"""
 
-    def __init__(self, popup_window=None):
+    def __init__(self):
         super().__init__()
 
         # 设置窗口对象名称，用于识别
@@ -352,9 +350,6 @@ class SettingsDialog(QDialog):
         self._is_dragging = False
         self._drag_start_pos: Optional[QPoint] = None
         self._drag_window_start_pos: Optional[QPoint] = None
-
-        # 保存 popup_window 引用（可能是 None）
-        self._popup_window = popup_window
 
         # 主题
         self._theme = get_theme()
@@ -1320,7 +1315,7 @@ class SettingsDialog(QDialog):
                 pass
             try:
                 writing_service = get_writing_service()
-                writing_service._load_api_config()
+                writing_service.reinitialize()
             except Exception:
                 pass
 
@@ -1353,45 +1348,12 @@ class SettingsDialog(QDialog):
                 pass
 
     def _update_all_themes(self):
-        """更新所有窗口的主题"""
-        # 更新划词翻译弹窗
-        if self._popup_window is not None:
-            try:
-                self._popup_window.update_theme()
-            except Exception:
-                pass
-
-        # 更新翻译窗口
+        """通过信号广播通知所有窗口更新主题"""
         try:
-            translator_window = get_translator_window()
-            if translator_window:
-                translator_window.update_theme()
-        except Exception:
-            pass
-
-        # 更新历史窗口
-        try:
-            history_window = get_history_window()
-            if history_window:
-                history_window.update_theme()
-        except Exception:
-            pass
-
-        # 更新帮助窗口
-        try:
-            help_window = get_help_window()
-            if help_window:
-                help_window.update_theme()
-        except Exception:
-            pass
-
-        # 更新托盘菜单
-        try:
-            tray_icon = get_tray_icon()
-            if tray_icon:
-                tray_icon.update_theme()
-        except Exception:
-            pass
+            from .utils.theme import get_theme_manager
+        except ImportError:
+            from src.utils.theme import get_theme_manager
+        get_theme_manager().notify_theme_changed()
 
     def _show_message_dialog(self, title: str, message: str, msg_type: str = "info"):
         """显示 toast 消息提示"""
@@ -1408,14 +1370,14 @@ class SettingsDialog(QDialog):
         QTimer.singleShot(100, lambda: SimpleToastWidget.show_message("保存成功"))
 
 
-class SimpleToastWidget(QWidget):
-    """简洁 Toast 消息提示组件（单行文字，宽度自适应）"""
+class FadeableToastBase(QWidget):
+    """Toast 淡出动画基类"""
 
-    # 全局列表，保持Toast引用防止被垃圾回收
+    # 子类需覆盖此列表
     _active_toasts = []
 
-    def __init__(self, message: str):
-        super().__init__(None)  # 无父窗口
+    def __init__(self, auto_close_ms: int = 2000):
+        super().__init__(None)
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
@@ -1425,19 +1387,60 @@ class SimpleToastWidget(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
-        self._setup_ui(message)
-        self._position_window()
-
         # 自动关闭定时器
         self._close_timer = QTimer(self)
         self._close_timer.setSingleShot(True)
         self._close_timer.timeout.connect(self._fade_out)
-        self._close_timer.start(2000)  # 2秒后开始消失
 
         # 淡出动画
         self._opacity = 1.0
         self._fade_timer = QTimer(self)
         self._fade_timer.timeout.connect(self._do_fade)
+
+        self._auto_close_ms = auto_close_ms
+
+    def _start_auto_close(self):
+        """启动自动关闭计时器（子类在 UI 初始化完成后调用）"""
+        self._close_timer.start(self._auto_close_ms)
+
+    def _position_at_bottom_center(self, margin_bottom: int = 60):
+        """定位窗口到屏幕底部中央"""
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geo = screen.availableGeometry()
+            x = (screen_geo.width() - self.width()) // 2
+            y = screen_geo.height() - self.height() - margin_bottom
+            self.move(x, y)
+
+    def _fade_out(self):
+        """开始淡出"""
+        self._fade_timer.start(30)
+
+    def _do_fade(self):
+        """执行淡出动画"""
+        self._opacity -= 0.05
+        if self._opacity <= 0:
+            self._fade_timer.stop()
+            self.close()
+            toast_list = type(self)._active_toasts
+            if self in toast_list:
+                toast_list.remove(self)
+            self.deleteLater()
+        else:
+            self.setWindowOpacity(self._opacity)
+
+
+class SimpleToastWidget(FadeableToastBase):
+    """简洁 Toast 消息提示组件（单行文字，宽度自适应）"""
+
+    _active_toasts = []
+
+    def __init__(self, message: str):
+        super().__init__(auto_close_ms=2000)
+
+        self._setup_ui(message)
+        self._position_at_bottom_center(margin_bottom=60)
+        self._start_auto_close()
 
     def _setup_ui(self, message: str):
         """设置UI - 单行文字，宽度自适应"""
@@ -1498,71 +1501,25 @@ class SimpleToastWidget(QWidget):
         shadow.setOffset(0, 2)
         self.setGraphicsEffect(shadow)
 
-    def _position_window(self):
-        """定位窗口 - 屏幕底部中央"""
-        screen = QApplication.primaryScreen()
-        if screen:
-            screen_geo = screen.availableGeometry()
-            x = (screen_geo.width() - self.width()) // 2
-            y = screen_geo.height() - self.height() - 60
-            self.move(x, y)
-
-    def _fade_out(self):
-        """开始淡出"""
-        self._fade_timer.start(30)  # 30ms间隔
-
-    def _do_fade(self):
-        """执行淡出动画"""
-        self._opacity -= 0.05
-        if self._opacity <= 0:
-            self._fade_timer.stop()
-            self.close()
-            # 从全局列表移除引用
-            if self in SimpleToastWidget._active_toasts:
-                SimpleToastWidget._active_toasts.remove(self)
-            self.deleteLater()
-        else:
-            self.setWindowOpacity(self._opacity)
-
     @staticmethod
     def show_message(message: str):
         """静态方法：显示简洁Toast消息"""
         toast = SimpleToastWidget(message)
-        # 添加到全局列表，防止被垃圾回收
         SimpleToastWidget._active_toasts.append(toast)
         toast.show()
 
 
-class ToastWidget(QWidget):
+class ToastWidget(FadeableToastBase):
     """Toast 消息提示组件"""
 
-    # 全局列表，保持Toast引用防止被垃圾回收
     _active_toasts = []
 
     def __init__(self, title: str, message: str, msg_type: str = "info"):
-        super().__init__(None)  # 无父窗口
-
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        super().__init__(auto_close_ms=2500)
 
         self._setup_ui(title, message, msg_type)
-        self._position_window()
-
-        # 自动关闭定时器
-        self._close_timer = QTimer(self)
-        self._close_timer.setSingleShot(True)
-        self._close_timer.timeout.connect(self._fade_out)
-        self._close_timer.start(2500)  # 2.5秒后开始消失
-
-        # 淡出动画
-        self._opacity = 1.0
-        self._fade_timer = QTimer(self)
-        self._fade_timer.timeout.connect(self._do_fade)
+        self._position_at_bottom_center(margin_bottom=80)
+        self._start_auto_close()
 
     def _setup_ui(self, title: str, message: str, msg_type: str):
         """设置UI"""
@@ -1623,37 +1580,10 @@ class ToastWidget(QWidget):
         shadow.setOffset(0, 2)
         self.setGraphicsEffect(shadow)
 
-    def _position_window(self):
-        """定位窗口 - 屏幕底部中央"""
-        screen = QApplication.primaryScreen()
-        if screen:
-            screen_geo = screen.availableGeometry()
-            x = (screen_geo.width() - self.width()) // 2
-            y = screen_geo.height() - self.height() - 80
-            self.move(x, y)
-
-    def _fade_out(self):
-        """开始淡出"""
-        self._fade_timer.start(30)  # 30ms间隔
-
-    def _do_fade(self):
-        """执行淡出动画"""
-        self._opacity -= 0.05
-        if self._opacity <= 0:
-            self._fade_timer.stop()
-            self.close()
-            # 从全局列表移除引用
-            if self in ToastWidget._active_toasts:
-                ToastWidget._active_toasts.remove(self)
-            self.deleteLater()
-        else:
-            self.setWindowOpacity(self._opacity)
-
     @staticmethod
     def show_message(title: str, message: str, msg_type: str = "info"):
         """静态方法：显示Toast消息"""
         toast = ToastWidget(title, message, msg_type)
-        # 添加到全局列表，防止被垃圾回收
         ToastWidget._active_toasts.append(toast)
         toast.show()
 
@@ -1666,8 +1596,6 @@ class MainController(QObject):
 
         self._config = get_config()
         self._selection_detector = get_selection_detector()
-        # 保持 popup_window 引用但不再用于划词翻译
-        self._popup_window = get_popup_window()
         self._translate_button = get_translate_button()
         self._tray_icon = get_tray_icon()
         self._translator = get_translator()
@@ -1824,11 +1752,19 @@ class MainController(QObject):
         self._translate_button.hide()
         # 隐藏翻译窗口
         self._translator_window.hide()
-        self._popup_window.hide()
-        self._popup_window.destroy()
         self._tray_icon.hide()
         self._tray_icon.cleanup()
         self._text_capture.cleanup()
+
+        # 确保历史记录保存到磁盘
+        try:
+            from .utils.history import get_history
+        except ImportError:
+            from src.utils.history import get_history
+        try:
+            get_history().flush()
+        except Exception:
+            pass
 
         log_info(f"{APP_NAME} 已停止")
 
@@ -2095,14 +2031,9 @@ class MainController(QObject):
             self._tray_icon.show_message(APP_NAME, "已禁用", "info")
             self._translate_button.hide()
             self._translator_window.hide()
-            self._popup_window.hide()
-
-    def _on_popup_closed(self):
-        """PopupWindow 关闭（保留用于兼容性）"""
-        pass
 
     def _on_settings_requested(self):
-        dialog = SettingsDialog(self._popup_window)
+        dialog = SettingsDialog()
         dialog.exec()
 
     def _on_translator_window_requested(self):
@@ -2231,6 +2162,11 @@ def main():
         nonlocal controller
         controller = MainController()
         controller.start()
+        # 启动时清理旧日志（超过 7 天的日志文件）
+        try:
+            get_logger().clear_old_logs(days=7)
+        except Exception:
+            pass
 
     # 显示启动动画，动画完成后初始化主控制器
     show_splash_screen(on_splash_finished)

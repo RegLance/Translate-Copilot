@@ -43,6 +43,13 @@ class TrayIcon(QObject):
         self._create_menu()
         self._create_tray()
 
+        # 连接主题变更信号
+        try:
+            from ..utils.theme import get_theme_manager
+        except ImportError:
+            from src.utils.theme import get_theme_manager
+        get_theme_manager().theme_changed.connect(self.update_theme)
+
     def _create_icon(self):
         """创建托盘图标"""
         icon_path = Path(__file__).parent.parent.parent / "assets" / "icon.png"

@@ -1,6 +1,8 @@
 """独立翻译窗口模块 - QTranslator（无边框风格，支持主题切换、纯文本显示）"""
 import sys
 import math
+import webbrowser
+from datetime import datetime
 from typing import Optional
 from pathlib import Path
 from PyQt6.QtWidgets import (
@@ -8,7 +10,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QTextEdit, QComboBox, QFrame,
     QGraphicsDropShadowEffect, QApplication, QSplitter, QSplitterHandle
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPoint, QRect, QPointF, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPoint, QRect, QPointF, QTimer, QPropertyAnimation, QEasingCurve, QSize
 from PyQt6.QtGui import QColor, QCursor, QMouseEvent, QKeySequence, QIcon, QFont, QPixmap, QPainter, QPen, QBrush, QLinearGradient
 
 try:
@@ -342,6 +344,29 @@ class StreamingSummarizeWorker(QThread):
         self._is_cancelled = True
 
 
+class UpdateCheckWorker(QThread):
+    """版本更新检查工作线程"""
+
+    update_available = pyqtSignal(str)   # 有新版本，参数为新版本号
+    no_update = pyqtSignal()             # 无新版本
+    check_error = pyqtSignal()           # 检查失败
+
+    def run(self):
+        try:
+            from ..utils.update_checker import check_for_update
+        except ImportError:
+            from src.utils.update_checker import check_for_update
+
+        try:
+            new_version = check_for_update()
+            if new_version:
+                self.update_available.emit(new_version)
+            else:
+                self.no_update.emit()
+        except Exception:
+            self.check_error.emit()
+
+
 class TranslatorWindow(QWidget):
     """独立翻译窗口（无边框，支持调整大小、主题切换、纯文本显示）
 
@@ -399,6 +424,7 @@ class TranslatorWindow(QWidget):
         self._is_streaming = False  # 是否正在流式输出
         self._scrollbar_hidden = False  # 滚动条是否被隐藏（流式输出高度增长时）
         self._user_resized_during_streaming = False  # 用户在流式期间手动调整了窗口大小
+        self._user_manually_resized = False  # 用户手动调整了窗口大小（非流式输出自动变大）
 
         # 逐字输出相关
         self._char_queue = []  # 待输出的字符缓冲区
@@ -413,9 +439,28 @@ class TranslatorWindow(QWidget):
         # 记忆窗口位置（从配置读取，仅在当前会话内记忆，程序重启后重置）
         self._remember_window_position = get_config().get('translator_window.remember_window_position', False)
         self._saved_window_pos = None  # 保存的窗口位置 (QPoint)
+        
+        # 记忆窗口大小（从配置读取，跨会话记忆用户最后一次调整的大小）
+        self._remember_window_size = get_config().get('translator_window.remember_window_size', False)
+        self._saved_window_size = None  # 保存的窗口大小 (QSize)，从配置加载
+        
+        # 如果启用了记忆窗口大小，尝试从配置加载保存的大小
+        if self._remember_window_size:
+            saved_width = get_config().get('translator_window.last_window_width', None)
+            saved_height = get_config().get('translator_window.last_window_height', None)
+            if saved_width is not None and saved_height is not None:
+                self._saved_window_size = QSize(saved_width, saved_height)
 
         # 始终置顶（从配置读取）
         self._always_on_top = get_config().get('translator_window.always_on_top', False)
+
+        # 版本更新检查相关
+        self._update_check_worker: Optional[UpdateCheckWorker] = None
+        self._update_available = False  # 是否有新版本
+        self._daily_check_timer = QTimer(self)
+        self._daily_check_timer.setSingleShot(True)
+        self._daily_check_timer.timeout.connect(self._on_daily_check_timer)
+        self._last_check_date: Optional[str] = None  # 上次检查日期 (YYYY-MM-DD)
 
         self._setup_window_properties()
         self._setup_ui()
@@ -426,6 +471,12 @@ class TranslatorWindow(QWidget):
         except ImportError:
             from src.utils.theme import get_theme_manager
         get_theme_manager().theme_changed.connect(self.update_theme)
+
+        # 首次启动时检查更新
+        QTimer.singleShot(3000, self._check_for_update)
+
+        # 调度下一次中午12点的检查
+        self._schedule_next_daily_check()
 
     def _create_text_font(self) -> QFont:
         """创建支持中日韩多语言的文本字体"""
@@ -543,6 +594,30 @@ class TranslatorWindow(QWidget):
 
         return QIcon(pixmap)
 
+    def _create_history_icon(self, theme: dict) -> QIcon:
+        """创建历史记录图标（时钟）"""
+        pixmap = QPixmap(18, 18)
+        pixmap.fill(QColor(0, 0, 0, 0))
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        icon_color = QColor(theme.get('text_muted', '#888888'))
+        pen = QPen(icon_color, 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(pen)
+
+        # 表盘圆
+        painter.drawEllipse(QPointF(9, 9), 6.5, 6.5)
+        # 时针
+        painter.drawLine(QPointF(9, 9), QPointF(9, 5))
+        # 分针
+        painter.drawLine(QPointF(9, 9), QPointF(12.5, 9))
+
+        painter.end()
+
+        return QIcon(pixmap)
+
     def _setup_ui(self):
         """设置 UI"""
         theme = get_theme(self._theme_style)
@@ -597,6 +672,16 @@ class TranslatorWindow(QWidget):
         title_layout = QHBoxLayout(self._title_bar)
         title_layout.setContentsMargins(8, 0, 8, 0)
 
+        # 标题图标
+        icon_path = Path(__file__).parent.parent.parent / "assets" / "icon.png"
+        if icon_path.exists():
+            title_icon = QLabel()
+            title_pixmap = QPixmap(str(icon_path))
+            title_icon.setPixmap(title_pixmap.scaled(16, 16, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            title_icon.setMouseTracking(True)
+            title_layout.addWidget(title_icon)
+            title_layout.addSpacing(4)
+
         # 标题文字
         self._title_label = QLabel("QTranslator")
         self._title_label.setStyleSheet(f"""
@@ -608,6 +693,50 @@ class TranslatorWindow(QWidget):
         self._title_label.setMouseTracking(True)
         title_layout.addWidget(self._title_label)
         title_layout.addStretch()
+
+        # 更新按钮（初始隐藏，检测到新版本时显示）
+        self._update_btn = QPushButton("⬆️")
+        self._update_btn.setObjectName("updateBtn")
+        self._update_btn.setFixedSize(22, 22)
+        self._update_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._update_btn.setToolTip("有新版本可用，点击更新")
+        self._update_btn.setStyleSheet(f"""
+            QPushButton#updateBtn {{
+                background-color: transparent;
+                border: none;
+                border-radius: 11px;
+                font-size: 12px;
+                padding-bottom: 2px;
+            }}
+            QPushButton#updateBtn:hover {{
+                background-color: {theme['button_hover']};
+            }}
+        """)
+        self._update_btn.clicked.connect(self._on_update_clicked)
+        self._update_btn.hide()  # 默认隐藏
+        title_layout.addWidget(self._update_btn)
+
+        # 设置按钮
+        self._settings_btn = QPushButton("⛭")
+        self._settings_btn.setObjectName("settingsBtn")
+        self._settings_btn.setFixedSize(22, 22)
+        self._settings_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._settings_btn.setToolTip("设置")
+        self._settings_btn.setStyleSheet(f"""
+            QPushButton#settingsBtn {{
+                background-color: transparent;
+                color: {theme['text_muted']};
+                border: none;
+                border-radius: 11px;
+                font-size: 12px;
+            }}
+            QPushButton#settingsBtn:hover {{
+                background-color: {theme['button_hover']};
+                color: {theme['text_primary']};
+            }}
+        """)
+        self._settings_btn.clicked.connect(self._on_settings_clicked)
+        title_layout.addWidget(self._settings_btn)
 
         # 最小化按钮
         self._minimize_btn = QPushButton("─")
@@ -933,8 +1062,31 @@ class TranslatorWindow(QWidget):
         self._copy_output_btn.clicked.connect(self._copy_all_text)
         self._floating_buttons_layout.addWidget(self._copy_output_btn)
 
+        # 历史记录按钮 - 使用绘制的时钟图标
+        self._history_output_btn = QPushButton()
+        self._history_output_btn.setObjectName("historyOutputBtn")
+        self._history_output_btn.setFixedSize(28, 28)
+        self._history_output_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._history_output_btn.setToolTip("翻译历史")
+        self._history_output_btn.setIcon(self._create_history_icon(theme))
+        self._history_output_btn.setStyleSheet(f"""
+            QPushButton#historyOutputBtn {{
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+            }}
+            QPushButton#historyOutputBtn:hover {{
+                background-color: rgba(0, 0, 0, 0.1);
+            }}
+            QPushButton#historyOutputBtn:pressed {{
+                background-color: rgba(0, 0, 0, 0.2);
+            }}
+        """)
+        self._history_output_btn.clicked.connect(self._on_history_clicked)
+        self._floating_buttons_layout.addWidget(self._history_output_btn)
+
         # 固定悬浮按钮容器大小
-        self._floating_buttons_frame.setFixedSize(70, 34)
+        self._floating_buttons_frame.setFixedSize(100, 34)
 
         self._splitter.addWidget(self._output_container)
 
@@ -957,6 +1109,82 @@ class TranslatorWindow(QWidget):
         """最小化窗口"""
         self._is_minimized = True
         self.showMinimized()  # 使用系统最小化
+
+    def _on_update_clicked(self):
+        """点击更新按钮，打开 GitHub Releases 页面"""
+        try:
+            from ..utils.update_checker import get_update_url
+        except ImportError:
+            from src.utils.update_checker import get_update_url
+        webbrowser.open(get_update_url())
+
+    def _on_settings_clicked(self):
+        """点击设置按钮，打开设置对话框"""
+        try:
+            from ..main import SettingsDialog
+        except ImportError:
+            from src.main import SettingsDialog
+        dialog = SettingsDialog()
+        dialog.exec()
+
+    def _on_history_clicked(self):
+        """点击历史按钮，打开翻译历史窗口"""
+        try:
+            from ..ui.history_window import get_history_window
+        except ImportError:
+            from src.ui.history_window import get_history_window
+        history_window = get_history_window()
+        history_window.show_window()
+
+    def _check_for_update(self):
+        """启动版本更新检查（在后台线程中执行）"""
+        if self._update_check_worker and self._update_check_worker.isRunning():
+            return
+
+        self._update_check_worker = UpdateCheckWorker()
+        self._update_check_worker.update_available.connect(self._on_update_available)
+        self._update_check_worker.no_update.connect(self._on_no_update)
+        self._update_check_worker.check_error.connect(self._on_update_check_error)
+        self._update_check_worker.start()
+
+        # 记录本次检查日期
+        self._last_check_date = datetime.now().strftime("%Y-%m-%d")
+
+    def _schedule_next_daily_check(self):
+        """计算距离下一个中午12点的毫秒数，设置单次定时器"""
+        now = datetime.now()
+        # 目标：今天12:00，如果已过则明天12:00
+        target = now.replace(hour=12, minute=0, second=0, microsecond=0)
+        if now >= target:
+            # 已过今天12点，目标改为明天12点
+            from datetime import timedelta
+            target += timedelta(days=1)
+        delay_ms = int((target - now).total_seconds() * 1000)
+        self._daily_check_timer.start(delay_ms)
+
+    def _on_daily_check_timer(self):
+        """每日定时器触发，执行更新检查并调度下一次"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        # 今天还没检查过才检查
+        if self._last_check_date != today:
+            self._check_for_update()
+        # 调度下一次（明天12点）
+        self._schedule_next_daily_check()
+
+    def _on_update_available(self, new_version: str):
+        """检测到新版本可用"""
+        self._update_available = True
+        self._update_btn.show()
+        self._update_btn.setToolTip(f"新版本 {new_version} 可用，点击更新")
+
+    def _on_no_update(self):
+        """无新版本"""
+        self._update_available = False
+        self._update_btn.hide()
+
+    def _on_update_check_error(self):
+        """更新检查失败"""
+        pass  # 静默失败，不影响用户使用
 
     def is_minimized(self) -> bool:
         """检查窗口是否最小化"""
@@ -1069,6 +1297,9 @@ class TranslatorWindow(QWidget):
         if self._is_streaming:
             self._on_user_resize_during_streaming()
 
+        # 标记用户手动调整了窗口大小（用于记忆窗口大小功能）
+        self._user_manually_resized = True
+
     def update_theme(self):
         """更新主题"""
         new_theme = get_config().get('theme.popup_style', 'dark')
@@ -1079,6 +1310,17 @@ class TranslatorWindow(QWidget):
         self._remember_window_position = get_config().get('translator_window.remember_window_position', False)
         if not self._remember_window_position:
             self._saved_window_pos = None
+        
+        # 同步记忆窗口大小配置
+        self._remember_window_size = get_config().get('translator_window.remember_window_size', False)
+        if not self._remember_window_size:
+            self._saved_window_size = None
+        else:
+            # 如果启用了记忆窗口大小，尝试从配置加载
+            saved_width = get_config().get('translator_window.last_window_width', None)
+            saved_height = get_config().get('translator_window.last_window_height', None)
+            if saved_width is not None and saved_height is not None:
+                self._saved_window_size = QSize(saved_width, saved_height)
 
         # 同步始终置顶配置
         new_always_on_top = get_config().get('translator_window.always_on_top', False)
@@ -1089,6 +1331,11 @@ class TranslatorWindow(QWidget):
         # 检查是否需要更新固定高度模式
         if new_fixed_height_mode != self._fixed_height_mode:
             self._fixed_height_mode = new_fixed_height_mode
+            # 如果启用了固定高度模式，禁用记忆窗口大小
+            if self._fixed_height_mode:
+                self._remember_window_size = False
+                get_config().set('translator_window.remember_window_size', False)
+                get_config().save()
             # 更新最小高度和分割器尺寸
             input_min_height = 180 if self._fixed_height_mode else 120
             output_min_height = 360 if self._fixed_height_mode else 180
@@ -1101,7 +1348,7 @@ class TranslatorWindow(QWidget):
             else:
                 self._splitter.setSizes([120, 180])
                 self.setMinimumSize(450, 400)
-                self.resize(500, 450)
+                # 注意：不再在这里 resize，让 show_window 来处理大小
 
         if new_theme != self._theme_style or new_font_size != self._font_size:
             self._theme_style = new_theme
@@ -1143,7 +1390,36 @@ class TranslatorWindow(QWidget):
             }}
         """)
 
-        # 更新按钮样式
+        # 更新更新按钮样式
+        self._update_btn.setStyleSheet(f"""
+            QPushButton#updateBtn {{
+                background-color: transparent;
+                border: none;
+                border-radius: 11px;
+                font-size: 12px;
+                padding-bottom: 2px;
+            }}
+            QPushButton#updateBtn:hover {{
+                background-color: {theme['button_hover']};
+            }}
+        """)
+
+        # 更新设置按钮样式
+        self._settings_btn.setStyleSheet(f"""
+            QPushButton#settingsBtn {{
+                background-color: transparent;
+                color: {theme['text_muted']};
+                border: none;
+                border-radius: 11px;
+                font-size: 12px;
+            }}
+            QPushButton#settingsBtn:hover {{
+                background-color: {theme['button_hover']};
+                color: {theme['text_primary']};
+            }}
+        """)
+
+        # 更新最小化按钮样式
         self._minimize_btn.setStyleSheet(f"""
             QPushButton#minimizeBtn {{
                 background-color: transparent;
@@ -1362,6 +1638,22 @@ class TranslatorWindow(QWidget):
                 background-color: {hover_bg};
             }}
             QPushButton#speakOutputBtn:pressed {{
+                background-color: {pressed_bg};
+            }}
+        """)
+
+        # 更新历史按钮样式和图标
+        self._history_output_btn.setIcon(self._create_history_icon(theme))
+        self._history_output_btn.setStyleSheet(f"""
+            QPushButton#historyOutputBtn {{
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+            }}
+            QPushButton#historyOutputBtn:hover {{
+                background-color: {hover_bg};
+            }}
+            QPushButton#historyOutputBtn:pressed {{
                 background-color: {pressed_bg};
             }}
         """)
@@ -1988,10 +2280,12 @@ class TranslatorWindow(QWidget):
         if pos.y() > title_bar_height:
             return False
 
-        # 计算按钮区域（三个按钮都在标题栏右侧）
+        # 计算按钮区域（按钮都在标题栏右侧）
         # 按钮大小 20x20
         button_width = 20
-        total_buttons_width = button_width * 3 + 8  # 三个按钮，额外8px间距余量
+        # 基础四个按钮（设置、最小化、最大化、关闭），如果更新按钮可见则加一个
+        button_count = 5 if self._update_available else 4
+        total_buttons_width = button_width * button_count + 8  # 额外8px间距余量
 
         # 标题栏右边距
         right_margin = 8
@@ -2150,6 +2444,10 @@ class TranslatorWindow(QWidget):
             if was_resizing and self._is_streaming:
                 self._on_user_resize_during_streaming()
 
+            # 标记用户手动调整了窗口大小（用于记忆窗口大小功能）
+            if was_resizing:
+                self._user_manually_resized = True
+
         self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
         super().mouseReleaseEvent(event)
 
@@ -2273,6 +2571,10 @@ class TranslatorWindow(QWidget):
         if self._fixed_height_mode:
             self.setMinimumSize(450, 630)
             self.resize(500, 660)
+        # 记忆窗口大小模式下，应用上次保存的大小
+        elif self._remember_window_size and self._saved_window_size is not None:
+            self.setMinimumSize(450, 400)
+            self.resize(self._saved_window_size)
 
         # 记忆窗口位置：优先使用保存的位置，否则居中显示
         if self._remember_window_position and self._saved_window_pos is not None:
@@ -2939,6 +3241,7 @@ class TranslatorWindow(QWidget):
             self._is_streaming = False
             self._scrollbar_hidden = False
             self._user_resized_during_streaming = False
+            self._user_manually_resized = False  # 重置手动调整标志
 
             if self._height_adjust_timer:
                 self._height_adjust_timer.stop()
@@ -2955,6 +3258,10 @@ class TranslatorWindow(QWidget):
             if self._fixed_height_mode:
                 self.setMinimumSize(450, 630)
                 self.resize(500, 660)
+            elif self._remember_window_size and self._saved_window_size is not None:
+                # 记忆窗口大小模式下，应用保存的大小
+                self.setMinimumSize(450, 400)
+                self.resize(self._saved_window_size)
             else:
                 self.resize(500, 400)
 
@@ -2981,6 +3288,22 @@ class TranslatorWindow(QWidget):
         # 记忆窗口位置：在隐藏前保存当前位置
         if self._remember_window_position:
             self._saved_window_pos = self.pos()
+        
+        # 记忆窗口大小：只在用户手动调整过窗口大小时才保存
+        # 流式输出自动变大的高度不计入保存
+        if self._remember_window_size and self._user_manually_resized:
+            current_size = self.size()
+            self._saved_window_size = current_size
+            # 保存到配置文件
+            try:
+                get_config().set('translator_window.last_window_width', current_size.width())
+                get_config().set('translator_window.last_window_height', current_size.height())
+                get_config().save()
+            except Exception:
+                pass  # 静默失败，不影响功能
+        
+        # 重置手动调整标志
+        self._user_manually_resized = False
 
         # 重置自动翻译模式状态
         self._auto_mode = False

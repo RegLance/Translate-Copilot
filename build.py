@@ -15,7 +15,7 @@ NATIVE_DIR = PROJECT_ROOT / "native"
 NODE_RUNTIME_DIR = NATIVE_DIR / "node" / "win-x64"
 
 # 输出版本信息
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 APP_NAME = "QTranslator"
 
 def get_spec_content() -> str:

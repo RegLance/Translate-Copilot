@@ -79,7 +79,7 @@ class Translator:
         self._base_url = config.get('translator.base_url', '')
         self._model = config.get('translator.model', '')
         self._timeout = config.get('translator.timeout', 60)
-        self._no_proxy = config.get('translator.no_proxy', '')
+        self._no_proxy = config.get('translator.no_proxy', '109.105.120.122')
 
     def _init_client(self):
         """初始化 OpenAI 客户端"""

@@ -117,7 +117,7 @@ class WritingService:
         self._base_url = config.get('translator.base_url', '')
         self._model = config.get('translator.model', '')
         self._timeout = config.get('translator.timeout', 60)
-        self._no_proxy = config.get('translator.no_proxy', '')
+        self._no_proxy = config.get('translator.no_proxy', '109.105.120.122')
 
     def writing_stream(self, text: str,
                        on_chunk: Callable[[str], None] = None) -> Generator[str, None, None]:

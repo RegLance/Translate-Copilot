@@ -635,6 +635,17 @@ class SettingsDialog(QDialog):
         self._fixed_height_hint_label.setWordWrap(True)
         translator_window_layout.addWidget(self._fixed_height_hint_label)
 
+        # 记忆窗口大小勾选框
+        self._remember_size_check = QCheckBox("固定窗口大小（上一次调整的大小）")
+        self._remember_size_check.toggled.connect(self._on_checkbox_toggled)
+        translator_window_layout.addWidget(self._remember_size_check)
+
+        # 添加说明文字
+        self._remember_size_hint_label = QLabel("勾选后，翻译窗口会记住用户最后一次手动调整的大小，下次唤醒时恢复")
+        self._remember_size_hint_label.setProperty("class", "hint")
+        self._remember_size_hint_label.setWordWrap(True)
+        translator_window_layout.addWidget(self._remember_size_hint_label)
+
         # 记忆窗口位置勾选框
         self._remember_position_check = QCheckBox("记忆窗口位置")
         self._remember_position_check.toggled.connect(self._on_checkbox_toggled)
@@ -989,8 +1000,8 @@ class SettingsDialog(QDialog):
         self._cached_check_icon = self._create_check_icon()
         self._cached_uncheck_icon = self._create_uncheck_icon()
         for cb in (self._auto_start_check, self._keep_original_check,
-                   self._fixed_height_check, self._remember_position_check,
-                   self._always_on_top_check):
+                   self._fixed_height_check, self._remember_size_check,
+                   self._remember_position_check, self._always_on_top_check):
             cb.setIcon(self._cached_check_icon if cb.isChecked() else self._cached_uncheck_icon)
 
     def _start_hotkey_capture(self, target: str):
@@ -1045,10 +1056,18 @@ class SettingsDialog(QDialog):
         super().keyPressEvent(event)
 
     def _on_checkbox_toggled(self, checked: bool):
-        """复选框状态改变时更新图标（使用缓存图标）"""
+        """复选框状态改变时更新图标（使用缓存图标）并处理互斥逻辑"""
         sender = self.sender()
         if sender and hasattr(self, '_cached_check_icon'):
             sender.setIcon(self._cached_check_icon if checked else self._cached_uncheck_icon)
+        
+        # 处理固定窗口高度和固定窗口大小的互斥逻辑
+        if sender == self._fixed_height_check and checked:
+            # 如果勾选了固定窗口高度，取消固定窗口大小
+            self._remember_size_check.setChecked(False)
+        elif sender == self._remember_size_check and checked:
+            # 如果勾选了固定窗口大小，取消固定窗口高度
+            self._fixed_height_check.setChecked(False)
 
     def update_theme(self):
         """更新主题"""
@@ -1127,7 +1146,7 @@ class SettingsDialog(QDialog):
         self._api_url_edit.setText(self._config.get('translator.base_url', ''))
         self._api_key_edit.setText(self._config.get('translator.api_key', ''))
         self._model_edit.setText(self._config.get('translator.model', ''))
-        self._no_proxy_edit.setText(self._config.get('translator.no_proxy', ''))
+        self._no_proxy_edit.setText(self._config.get('translator.no_proxy', '109.105.120.122'))
 
         target_lang = self._config.get('target_language', '中文')
         index = self._target_lang_combo.findText(target_lang)
@@ -1176,6 +1195,10 @@ class SettingsDialog(QDialog):
         # 记忆窗口位置选项
         remember_position = self._config.get('translator_window.remember_window_position', False)
         self._remember_position_check.setChecked(remember_position)
+        
+        # 记忆窗口大小选项
+        remember_size = self._config.get('translator_window.remember_window_size', False)
+        self._remember_size_check.setChecked(remember_size)
 
         # 始终置顶选项
         always_on_top = self._config.get('translator_window.always_on_top', False)
@@ -1298,6 +1321,10 @@ class SettingsDialog(QDialog):
             # 翻译窗口记忆位置
             remember_position = self._remember_position_check.isChecked()
             self._config.set('translator_window.remember_window_position', remember_position)
+            
+            # 翻译窗口记忆大小
+            remember_size = self._remember_size_check.isChecked()
+            self._config.set('translator_window.remember_window_size', remember_size)
 
             # 翻译窗口始终置顶
             always_on_top = self._always_on_top_check.isChecked()

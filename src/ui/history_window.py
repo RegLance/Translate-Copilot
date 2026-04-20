@@ -5,10 +5,10 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QListWidget, QListWidgetItem, QFrame,
     QGraphicsDropShadowEffect, QLineEdit, QDialog,
-    QAbstractItemView, QSplitter, QScrollArea
+    QAbstractItemView, QSplitter, QScrollArea, QFileDialog
 )
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRect
-from PyQt6.QtGui import QColor, QCursor, QMouseEvent, QIcon
+from PyQt6.QtGui import QColor, QCursor, QMouseEvent, QIcon, QPainter, QPixmap, QPen
 
 try:
     from ..utils.history import get_history, HistoryItem
@@ -84,9 +84,49 @@ class HistoryWindow(QWidget):
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 
+    def _create_speak_icon(self, theme: dict) -> QIcon:
+        """创建朗读图标（播放三角形）"""
+        pixmap = QPixmap(18, 18)
+        pixmap.fill(QColor(0, 0, 0, 0))
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # 图标颜色使用主题的 muted 文本颜色
+        icon_color = QColor(theme.get('text_muted', '#888888'))
+
+        # 绘制播放三角形
+        painter.setBrush(icon_color)
+        painter.setPen(QPen(Qt.PenStyle.NoPen))
+
+        # 三角形的三个顶点
+        from PyQt6.QtCore import QPointF
+        triangle = [
+            QPointF(5, 3),    # 左上
+            QPointF(5, 15),   # 左下
+            QPointF(15, 9),   # 右中
+        ]
+        painter.drawPolygon(*triangle)
+
+        painter.end()
+
+        return QIcon(pixmap)
+
     def _setup_ui(self):
         """设置UI"""
         theme = get_theme(self._theme_style)
+
+        # 设置全局 QToolTip 样式，解决深色主题下 tooltip 文字不可见的问题
+        self.setStyleSheet(f"""
+            QToolTip {{
+                background-color: {theme['bg_secondary']};
+                color: {theme['text_primary']};
+                border: 1px solid {theme['border_color']};
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }}
+        """)
 
         # 主布局
         layout = QVBoxLayout(self)
@@ -147,6 +187,23 @@ class HistoryWindow(QWidget):
         """)
         title_layout.addWidget(self._title_label)
         title_layout.addStretch()
+
+        # 导出按钮
+        self._export_btn = QPushButton("导出")
+        self._export_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {theme['text_muted']};
+                border: none;
+                font-size: 12px;
+                padding: 2px 8px;
+            }}
+            QPushButton:hover {{
+                color: {theme['accent_color']};
+            }}
+        """)
+        self._export_btn.clicked.connect(self._export_history)
+        title_layout.addWidget(self._export_btn)
 
         # 清空按钮
         self._clear_btn = QPushButton("清空")
@@ -420,21 +477,24 @@ class HistoryWindow(QWidget):
         self._copy_original_btn.clicked.connect(self._copy_original)
         btn_layout.addWidget(self._copy_original_btn)
 
-        # 朗读原文按钮
-        self._speak_original_btn = QPushButton("🔊")
-        self._speak_original_btn.setFixedSize(32, 32)
+        # 朗读原文按钮 - 使用绘制的播放图标
+        self._speak_original_btn = QPushButton()
+        self._speak_original_btn.setObjectName("speakOriginalBtn")
+        self._speak_original_btn.setFixedSize(28, 28)
         self._speak_original_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._speak_original_btn.setToolTip("朗读原文")
+        self._speak_original_btn.setIcon(self._create_speak_icon(theme))
         self._speak_original_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {theme['button_bg']};
-                color: {theme['text_primary']};
+            QPushButton#speakOriginalBtn {{
+                background-color: transparent;
                 border: none;
                 border-radius: 4px;
-                font-size: 14px;
             }}
-            QPushButton:hover {{
-                background-color: {theme['button_hover']};
+            QPushButton#speakOriginalBtn:hover {{
+                background-color: rgba(0, 0, 0, 0.1);
+            }}
+            QPushButton#speakOriginalBtn:pressed {{
+                background-color: rgba(0, 0, 0, 0.2);
             }}
         """)
         self._speak_original_btn.clicked.connect(self._speak_original)
@@ -459,21 +519,24 @@ class HistoryWindow(QWidget):
         self._copy_btn.clicked.connect(self._copy_translated)
         btn_layout.addWidget(self._copy_btn)
 
-        # 朗读译文按钮
-        self._speak_btn = QPushButton("🔊")
-        self._speak_btn.setFixedSize(32, 32)
+        # 朗读译文按钮 - 使用绘制的播放图标
+        self._speak_btn = QPushButton()
+        self._speak_btn.setObjectName("speakTranslatedBtn")
+        self._speak_btn.setFixedSize(28, 28)
         self._speak_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._speak_btn.setToolTip("朗读译文")
+        self._speak_btn.setIcon(self._create_speak_icon(theme))
         self._speak_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {theme['accent_color']};
-                color: #ffffff;
+            QPushButton#speakTranslatedBtn {{
+                background-color: transparent;
                 border: none;
                 border-radius: 4px;
-                font-size: 14px;
             }}
-            QPushButton:hover {{
-                background-color: {theme['accent_hover']};
+            QPushButton#speakTranslatedBtn:hover {{
+                background-color: rgba(0, 0, 0, 0.1);
+            }}
+            QPushButton#speakTranslatedBtn:pressed {{
+                background-color: rgba(0, 0, 0, 0.2);
             }}
         """)
         self._speak_btn.clicked.connect(self._speak_translated)
@@ -517,6 +580,18 @@ class HistoryWindow(QWidget):
     def _apply_theme(self):
         """应用主题"""
         theme = get_theme(self._theme_style)
+
+        # 更新全局 QToolTip 样式
+        self.setStyleSheet(f"""
+            QToolTip {{
+                background-color: {theme['bg_secondary']};
+                color: {theme['text_primary']};
+                border: 1px solid {theme['border_color']};
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }}
+        """)
 
         # 更新内容框架
         self._content_frame.setStyleSheet(f"""
@@ -734,31 +809,35 @@ class HistoryWindow(QWidget):
             }}
         """)
 
-        # 更新朗读原文按钮样式
+        # 更新朗读原文按钮样式和图标
+        self._speak_original_btn.setIcon(self._create_speak_icon(theme))
         self._speak_original_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {theme['button_bg']};
-                color: {theme['text_primary']};
+            QPushButton#speakOriginalBtn {{
+                background-color: transparent;
                 border: none;
                 border-radius: 4px;
-                font-size: 14px;
             }}
-            QPushButton:hover {{
-                background-color: {theme['button_hover']};
+            QPushButton#speakOriginalBtn:hover {{
+                background-color: rgba(0, 0, 0, 0.1);
+            }}
+            QPushButton#speakOriginalBtn:pressed {{
+                background-color: rgba(0, 0, 0, 0.2);
             }}
         """)
 
-        # 更新朗读译文按钮样式
+        # 更新朗读译文按钮样式和图标
+        self._speak_btn.setIcon(self._create_speak_icon(theme))
         self._speak_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {theme['accent_color']};
-                color: #ffffff;
+            QPushButton#speakTranslatedBtn {{
+                background-color: transparent;
                 border: none;
                 border-radius: 4px;
-                font-size: 14px;
             }}
-            QPushButton:hover {{
-                background-color: {theme['accent_hover']};
+            QPushButton#speakTranslatedBtn:hover {{
+                background-color: rgba(0, 0, 0, 0.1);
+            }}
+            QPushButton#speakTranslatedBtn:pressed {{
+                background-color: rgba(0, 0, 0, 0.2);
             }}
         """)
 
@@ -768,6 +847,20 @@ class HistoryWindow(QWidget):
                 color: {theme['text_muted']};
                 font-size: 12px;
                 padding: 4px;
+            }}
+        """)
+
+        # 更新导出按钮
+        self._export_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {theme['text_muted']};
+                border: none;
+                font-size: 12px;
+                padding: 2px 8px;
+            }}
+            QPushButton:hover {{
+                color: {theme['accent_color']};
             }}
         """)
 
@@ -875,6 +968,45 @@ class HistoryWindow(QWidget):
             else:
                 tts.speak(self._current_item.translated_text)
                 self._status_label.setText("正在朗读译文...")
+
+    def _export_history(self):
+        """导出历史记录为 JSON 文件"""
+        import json
+        from datetime import datetime
+
+        items = self._history.get_history(limit=9999)
+        if not items:
+            self._status_label.setText("没有可导出的记录")
+            return
+
+        # 默认保存到系统 Downloads 目录
+        downloads_dir = Path.home() / "Downloads"
+        if not downloads_dir.exists():
+            downloads_dir = Path.home()
+
+        default_name = str(downloads_dir / f"翻译历史_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+
+        # 弹出文件保存对话框
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出翻译历史",
+            default_name,
+            "JSON 文件 (*.json);;所有文件 (*)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            # 将所有历史记录转换为字典列表
+            data = [item.to_dict() for item in items]
+
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+            self._status_label.setText(f"已导出 {len(items)} 条记录到 {Path(file_path).name}")
+        except Exception as e:
+            self._status_label.setText(f"导出失败: {e}")
 
     def _clear_history(self):
         """清空历史"""
@@ -1019,8 +1151,8 @@ class HistoryWindow(QWidget):
         if pos.y() > title_bar_height:
             return False
 
-        # history_window 的按钮区域包括：清空按钮、最小化、最大化、关闭按钮
-        # 清空按钮在左侧，三个窗口控制按钮在右侧
+        # history_window 的按钮区域包括：导出按钮、清空按钮、最小化、最大化、关闭按钮
+        # 导出和清空按钮在左侧，三个窗口控制按钮在右侧
         # 窗口控制按钮大小 20x20，右侧有三个按钮
         button_width = 20
         total_buttons_width = button_width * 3 + 8  # 三个按钮，额外8px间距余量
@@ -1032,13 +1164,13 @@ class HistoryWindow(QWidget):
         window_width = self.width()
         buttons_left = window_width - right_margin - total_buttons_width
 
-        # 左侧的清空按钮区域（大约 40px 左右）
-        clear_button_width = 40
+        # 左侧的导出+清空按钮区域（大约 80px 左右）
+        left_button_width = 80
         left_margin = 8
-        clear_button_right = left_margin + clear_button_width + 8  # 额外8px余量
+        left_button_right = left_margin + left_button_width + 8  # 额外8px余量
 
-        # 检查鼠标是否在按钮区域内（左侧清空按钮或右侧三个控制按钮）
-        return pos.x() >= buttons_left or (pos.x() <= clear_button_right)
+        # 检查鼠标是否在按钮区域内（左侧导出/清空按钮或右侧三个控制按钮）
+        return pos.x() >= buttons_left or (pos.x() <= left_button_right)
 
     def _get_resize_edge(self, pos: QPoint) -> Optional[str]:
         """判断鼠标位置对应的调整边缘（优化灵敏度）"""

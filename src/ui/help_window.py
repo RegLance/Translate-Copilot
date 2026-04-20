@@ -144,7 +144,7 @@ class HelpWindow(QWidget):
         version_layout.setContentsMargins(12, 10, 12, 10)
         version_layout.setSpacing(4)
 
-        self._version_label = QLabel(f"v{APP_VERSION}  |  {BUILD_TIME}  |  by SQAG Team")
+        self._version_label = QLabel(f"v{APP_VERSION}  |  {BUILD_TIME}  |  by SQAG")
         self._version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._version_label.setStyleSheet(f"""
             color: {theme['text_primary']};
@@ -228,6 +228,12 @@ class HelpWindow(QWidget):
 • 翻译结果仅供参考，请核实重要内容
 • 如遇到问题，可查看日志文件或检查API配置
 • 浏览器中划词延迟时间可在设置中调整
+        """, theme)
+
+        # 更新信息
+        self._add_section(self._help_layout, "更新信息", theme)
+        self._add_text(self._help_layout, """
+暂无更新信息
         """, theme)
 
         self._help_layout.addStretch()

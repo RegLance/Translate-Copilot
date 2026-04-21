@@ -2556,8 +2556,8 @@ class TranslatorWindow(QWidget):
             frame_height = self._content_frame.height()
             label_width = self._version_label.width()
             label_height = self._version_label.height()
-            # 定位在右下角，考虑边距
-            x = frame_width - label_width - 18
+            # 定位在左下角，考虑左边距
+            x = 18
             y = frame_height - label_height - 6
             self._version_label.move(x, y)
         except RuntimeError:

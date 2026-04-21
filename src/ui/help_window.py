@@ -277,7 +277,9 @@ class HelpWindow(QWidget):
             }}
         """)
 
-        self._contact_btn.clicked.connect(subprocess.Popen(f'start "" "{CONTACT_URL}"', shell=True))
+        def open_url():
+            subprocess.Popen(f'start "" "{CONTACT_URL}"', shell=True)
+        self._contact_btn.clicked.connect(open_url)
 
         btn_layout.addWidget(self._contact_btn)
 

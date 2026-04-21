@@ -494,8 +494,8 @@ class TranslatorWindow(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         # 窗口最小高度计算：
-        # 默认模式：标题栏(28) + 控制栏(38) + 边距(40) + 原文框(120) + 分割条(6) + 译文框(180) = 372
-        # 固定高度模式：标题栏(28) + 控制栏(38) + 边距(40) + 原文框(180) + 分割条(6) + 译文框(360) = 652
+        # 默认模式：标题栏(28) + 控制栏(38) + 边距(52) + 原文框(120) + 分割条(6) + 译文框(180) = 424
+        # 固定高度模式：标题栏(28) + 控制栏(38) + 边距(52) + 原文框(180) + 分割条(6) + 译文框(360) = 704
         if self._fixed_height_mode:
             self.setMinimumSize(450, 630)
             self.resize(500, 660)
@@ -650,7 +650,7 @@ class TranslatorWindow(QWidget):
 
         # 内容布局
         content_layout = QVBoxLayout(self._content_frame)
-        content_layout.setContentsMargins(12, 8, 12, 12)
+        content_layout.setContentsMargins(12, 8, 12, 22)
         content_layout.setSpacing(10)
 
         # 标题栏
@@ -1104,6 +1104,20 @@ class TranslatorWindow(QWidget):
         self._title_bar.installEventFilter(self)
         self._title_label.installEventFilter(self)
         self._content_frame.installEventFilter(self)
+
+        # 底部版本标签（绝对定位在右下角边框区域）
+        self._version_label = QLabel("v2.0.0 by Reg")
+        self._version_label.setParent(self._content_frame)
+        self._version_label.setObjectName("versionLabel")
+        self._version_label.setStyleSheet(f"""
+            QLabel#versionLabel {{
+                color: {theme['text_muted']};
+                font-size: 10px;
+                background: transparent;
+            }}
+        """)
+        self._version_label.adjustSize()
+        self._version_label.raise_()
 
     def _on_minimize(self):
         """最小化窗口"""
@@ -1655,6 +1669,15 @@ class TranslatorWindow(QWidget):
             }}
             QPushButton#historyOutputBtn:pressed {{
                 background-color: {pressed_bg};
+            }}
+        """)
+
+        # 更新底部版本标签样式
+        self._version_label.setStyleSheet(f"""
+            QLabel#versionLabel {{
+                color: {theme['text_muted']};
+                font-size: 10px;
+                background: transparent;
             }}
         """)
 
@@ -2464,6 +2487,11 @@ class TranslatorWindow(QWidget):
             self._update_output_layout()
             return False  # 不拦截，让事件继续传播
 
+        # 处理内容框架的 resize 事件（更新版本标签位置）
+        if hasattr(self, '_version_label') and obj == self._content_frame and event.type() == event.Type.Resize:
+            self._update_version_label_position()
+            return False
+
         # 处理输入框的键盘事件
         if obj == self._input_text and event.type() == event.Type.KeyPress:
             key = event.key()
@@ -2519,6 +2547,20 @@ class TranslatorWindow(QWidget):
 
         except RuntimeError:
             # 窗口已被销毁，忽略
+            pass
+
+    def _update_version_label_position(self):
+        """更新底部版本标签位置（右下角）"""
+        try:
+            frame_width = self._content_frame.width()
+            frame_height = self._content_frame.height()
+            label_width = self._version_label.width()
+            label_height = self._version_label.height()
+            # 定位在右下角，考虑边距
+            x = frame_width - label_width - 18
+            y = frame_height - label_height - 6
+            self._version_label.move(x, y)
+        except RuntimeError:
             pass
 
     def _get_cursor_shape_for_edge(self, edge: Optional[str]) -> Qt.CursorShape:

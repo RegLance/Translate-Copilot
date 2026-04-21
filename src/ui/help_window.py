@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl
 from PyQt6.QtGui import QFont, QColor, QCursor, QDesktopServices, QMouseEvent
+import subprocess
 
 try:
     from ..config import get_config, APP_NAME, APP_VERSION, BUILD_TIME
@@ -16,7 +17,7 @@ except ImportError:
     from src.utils.theme import get_theme, get_scrollbar_style
 
 # 联系我们网址
-CONTACT_URL = "https://github.com/sqag-team/qtranslator"
+CONTACT_URL = "xxxx"
 
 
 class HelpWindow(QWidget):
@@ -275,9 +276,9 @@ class HelpWindow(QWidget):
                 color: {theme['text_primary']};
             }}
         """)
-        self._contact_btn.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl(CONTACT_URL))
-        )
+
+        self._contact_btn.clicked.connect(subprocess.Popen(f'start "" "{CONTACT_URL}"', shell=True))
+
         btn_layout.addWidget(self._contact_btn)
 
         btn_layout.addStretch()

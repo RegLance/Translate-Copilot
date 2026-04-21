@@ -497,7 +497,7 @@ class TranslatorWindow(QWidget):
         # 默认模式：标题栏(28) + 控制栏(38) + 边距(52) + 原文框(120) + 分割条(6) + 译文框(180) = 424
         # 固定高度模式：标题栏(28) + 控制栏(38) + 边距(52) + 原文框(180) + 分割条(6) + 译文框(360) = 704
         if self._fixed_height_mode:
-            self.setMinimumSize(450, 630)
+            self.setMinimumSize(450, 660)
             self.resize(500, 660)
         else:
             self.setMinimumSize(450, 450)
@@ -1357,7 +1357,7 @@ class TranslatorWindow(QWidget):
             self._output_container.setMinimumHeight(output_min_height)
             if self._fixed_height_mode:
                 self._splitter.setSizes([180, 360])
-                self.setMinimumSize(450, 630)
+                self.setMinimumSize(450, 660)
                 self.resize(500, 660)
             else:
                 self._splitter.setSizes([120, 180])
@@ -2611,7 +2611,7 @@ class TranslatorWindow(QWidget):
 
         # 固定高度模式下，每次显示都重置到预设尺寸
         if self._fixed_height_mode:
-            self.setMinimumSize(450, 630)
+            self.setMinimumSize(450, 660)
             self.resize(500, 660)
         # 记忆窗口大小模式下，应用上次保存的大小
         elif self._remember_window_size and self._saved_window_size is not None:
@@ -3298,7 +3298,7 @@ class TranslatorWindow(QWidget):
 
             # 根据模式重置窗口尺寸
             if self._fixed_height_mode:
-                self.setMinimumSize(450, 630)
+                self.setMinimumSize(450, 660)
                 self.resize(500, 660)
             elif self._remember_window_size and self._saved_window_size is not None:
                 # 记忆窗口大小模式下，应用保存的大小

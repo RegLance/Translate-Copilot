@@ -1237,6 +1237,7 @@ class HistoryWindow(QWidget):
         else:
             # 最大化
             self._normal_geometry = self.geometry()
+            from PyQt6.QtWidgets import QApplication
             screen = QApplication.primaryScreen()
             if screen:
                 self.setGeometry(screen.availableGeometry())

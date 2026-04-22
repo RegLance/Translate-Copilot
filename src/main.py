@@ -2068,7 +2068,6 @@ class MainController(QObject):
             # 检测 ctrl+a + ctrl+c 是否成功
             # 如果剪贴板仍是标记值，说明目标应用不支持全选或复制失败
             if clipboard_marker and text == clipboard_marker:
-                log_warning("ctrl+a+ctrl+c 未能更新剪贴板，目标应用可能不支持全选")
                 # 取消可能存在的选中状态
                 keyboard.release('ctrl')
                 keyboard.release('shift')

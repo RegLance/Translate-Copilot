@@ -142,7 +142,7 @@ class TrayIcon(QObject):
         self._apply_menu_style()
 
         # 启用/禁用选项
-        self._enable_action = QAction("启用翻译", self._menu)
+        self._enable_action = QAction("启用划词", self._menu)
         self._enable_action.setCheckable(True)
         self._enable_action.setChecked(True)
         self._enable_action.setIcon(self._check_icon)  # 设置勾选图标

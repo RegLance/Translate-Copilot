@@ -454,6 +454,9 @@ class TranslatorWindow(QWidget):
         # 始终置顶（从配置读取）
         self._always_on_top = get_config().get('translator_window.always_on_top', False)
 
+        # 默认功能选择（从配置读取）
+        self._default_function = get_config().get('translator_window.default_function', 'translate')
+
         # 版本更新检查相关
         self._update_check_worker: Optional[UpdateCheckWorker] = None
         self._update_available = False  # 是否有新版本
@@ -873,6 +876,7 @@ class TranslatorWindow(QWidget):
             }}
         """)
         self._translate_btn.clicked.connect(self._start_translation)
+        self._translate_btn.installEventFilter(self)  # 安装事件过滤器以处理右键点击
         control_layout.addWidget(self._translate_btn)
 
         # 润色按钮
@@ -897,6 +901,7 @@ class TranslatorWindow(QWidget):
             }}
         """)
         self._polishing_btn.clicked.connect(self._start_polishing)
+        self._polishing_btn.installEventFilter(self)  # 安装事件过滤器以处理右键点击
         control_layout.addWidget(self._polishing_btn)
 
         # 总结按钮
@@ -921,6 +926,7 @@ class TranslatorWindow(QWidget):
             }}
         """)
         self._summarize_btn.clicked.connect(self._start_summarize)
+        self._summarize_btn.installEventFilter(self)  # 安装事件过滤器以处理右键点击
         control_layout.addWidget(self._summarize_btn)
 
         content_layout.addWidget(self._control_bar)
@@ -1118,6 +1124,9 @@ class TranslatorWindow(QWidget):
         """)
         self._version_label.adjustSize()
         self._version_label.raise_()
+
+        # 应用默认功能的选中状态
+        self._apply_default_function_style()
 
     def _on_minimize(self):
         """最小化窗口"""
@@ -1680,6 +1689,9 @@ class TranslatorWindow(QWidget):
                 background: transparent;
             }}
         """)
+
+        # 应用默认功能按钮样式（确保主题切换后样式保持不变）
+        self._apply_default_function_style()
 
     def _copy_all_text(self):
         """复制译文"""
@@ -2493,16 +2505,16 @@ class TranslatorWindow(QWidget):
             return False
 
         # 处理输入框的键盘事件
-        if obj == self._input_text and event.type() == event.Type.KeyPress:
+        if hasattr(self, '_input_text') and obj == self._input_text and event.type() == event.Type.KeyPress:
             key = event.key()
             # 处理回车键
             if key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
                 # Shift+回车：换行（不拦截，让 QTextEdit 处理）
                 if event.modifiers() == Qt.KeyboardModifier.ShiftModifier:
                     return False  # 不拦截，让事件继续传播
-                # 回车（无修饰）：触发翻译
+                # 回车（无修饰）：触发默认功能
                 if self._input_text.toPlainText().strip():
-                    self._start_translation()
+                    self._execute_default_function()
                     return True  # 拦截事件，阻止换行
 
         if event.type() == event.Type.MouseMove:
@@ -2522,6 +2534,19 @@ class TranslatorWindow(QWidget):
         elif event.type() == event.Type.Leave:
             self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
             obj.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+
+        # 处理功能按钮的右键点击事件
+        if event.type() == event.Type.MouseButtonRelease:
+            if hasattr(self, '_translate_btn') and obj in (self._translate_btn, self._polishing_btn, self._summarize_btn):
+                if event.button() == Qt.MouseButton.RightButton:
+                    # 右键点击设置默认功能
+                    if obj == self._translate_btn:
+                        self._set_default_function('translate')
+                    elif obj == self._polishing_btn:
+                        self._set_default_function('polishing')
+                    elif obj == self._summarize_btn:
+                        self._set_default_function('summarize')
+                    return True  # 拦截事件
 
         return super().eventFilter(obj, event)
 
@@ -2562,6 +2587,101 @@ class TranslatorWindow(QWidget):
             self._version_label.move(x, y)
         except RuntimeError:
             pass
+
+    def _set_default_function(self, function_name: str):
+        """设置默认功能
+        
+        Args:
+            function_name: 功能名称 ('translate', 'polishing', 'summarize')
+        """
+        # 保存设置到配置文件
+        self._default_function = function_name
+        get_config().set('translator_window.default_function', function_name)
+        get_config().save()
+        
+        # 应用按钮样式
+        self._apply_default_function_style()
+        
+        # 显示提示信息
+        function_labels = {
+            'translate': '翻译',
+            'polishing': '润色',
+            'summarize': '总结'
+        }
+        label = function_labels.get(function_name, '翻译')
+        self._title_label.setText(f"QTranslator - 默认功能: {label}")
+        
+        # 2秒后恢复标题
+        QTimer.singleShot(2000, lambda: self._title_label.setText("QTranslator"))
+
+    def _apply_default_function_style(self):
+        """应用默认功能按钮样式"""
+        theme = get_theme(self._theme_style)
+        
+        # 选中的按钮样式（使用翻译按钮的颜色）
+        selected_style = f"""
+            QPushButton {{
+                background-color: {theme['accent_color']};
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 0 8px;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {theme['accent_hover']};
+            }}
+            QPushButton:disabled {{
+                background-color: {theme['scrollbar_handle']};
+                color: {theme['text_muted']};
+            }}
+        """
+        
+        # 未选中的按钮样式
+        normal_style = f"""
+            QPushButton {{
+                background-color: {theme['button_bg']};
+                color: {theme['text_primary']};
+                border: 1px solid {theme['border_color']};
+                border-radius: 4px;
+                padding: 0 8px;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme['button_hover']};
+            }}
+            QPushButton:disabled {{
+                background-color: {theme['scrollbar_handle']};
+                color: {theme['text_muted']};
+            }}
+        """
+        
+        # 根据默认功能应用样式
+        if self._default_function == 'translate':
+            self._translate_btn.setStyleSheet(selected_style)
+            self._polishing_btn.setStyleSheet(normal_style)
+            self._summarize_btn.setStyleSheet(normal_style)
+        elif self._default_function == 'polishing':
+            self._translate_btn.setStyleSheet(normal_style)
+            self._polishing_btn.setStyleSheet(selected_style)
+            self._summarize_btn.setStyleSheet(normal_style)
+        elif self._default_function == 'summarize':
+            self._translate_btn.setStyleSheet(normal_style)
+            self._polishing_btn.setStyleSheet(normal_style)
+            self._summarize_btn.setStyleSheet(selected_style)
+
+    def _execute_default_function(self):
+        """执行当前选中的默认功能"""
+        if self._default_function == 'translate':
+            self._start_translation()
+        elif self._default_function == 'polishing':
+            self._start_polishing()
+        elif self._default_function == 'summarize':
+            self._start_summarize()
+        else:
+            # 默认执行翻译
+            self._start_translation()
 
     def _get_cursor_shape_for_edge(self, edge: Optional[str]) -> Qt.CursorShape:
         """根据边缘获取光标形状"""
@@ -2641,11 +2761,11 @@ class TranslatorWindow(QWidget):
             self.hide()
             return
 
-        # 当焦点不在输入框时，回车键触发翻译
-        # 输入框的回车键由事件过滤器处理（回车=翻译，Shift+回车=换行）
+        # 当焦点不在输入框时，回车键执行默认功能
+        # 输入框的回车键由事件过滤器处理（回车=默认功能，Shift+回车=换行）
         if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
             if not self._input_text.hasFocus() and self._input_text.toPlainText().strip():
-                self._start_translation()
+                self._execute_default_function()
                 return
 
         super().keyPressEvent(event)

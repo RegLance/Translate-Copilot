@@ -2797,6 +2797,24 @@ class TranslatorWindow(QWidget):
             self.showNormal()
 
         self._is_minimized = False
+
+        # 重置流式翻译状态（与 show_at_mouse 中 _reset_window_height 保持一致）
+        # 防止窗口隐藏前的翻译状态残留导致分割条异常
+        self._is_streaming = False
+        self._scrollbar_hidden = False
+        self._user_resized_during_streaming = False
+        self._last_adjusted_height = 0
+
+        # 停止可能残留的定时器和动画
+        if self._height_adjust_timer and self._height_adjust_timer.isActive():
+            self._height_adjust_timer.stop()
+        from PyQt6.QtCore import QPropertyAnimation
+        if self._height_animation and self._height_animation.state() == QPropertyAnimation.State.Running:
+            self._height_animation.stop()
+
+        # 恢复滚动条显示（内部会解锁原文框高度并设置 stretch factor 为 (0,1)）
+        self._show_output_scrollbar()
+
         self.update_theme()
 
         # 固定高度模式下，每次显示都重置到预设尺寸
@@ -3051,10 +3069,27 @@ class TranslatorWindow(QWidget):
     def _final_height_adjust(self):
         """流式翻译结束后的最终高度调整"""
         try:
+            # 在解锁前保存当前原文框高度，防止 _show_output_scrollbar 改变
+            # stretch factor 后 Qt 布局系统重新分配导致原文框收缩
+            current_sizes = self._splitter.sizes()
+            saved_input_height = current_sizes[0] if current_sizes else 120
+            saved_input_height = max(saved_input_height, 120)
+
             # 恢复滚动条显示（流式输出结束后）
-            # _show_output_scrollbar 内部会同步恢复分割条的拉伸因子
+            # _show_output_scrollbar 内部会同步恢复分割条的拉伸因子并解锁原文框高度
             self._show_output_scrollbar()
             self._scrollbar_hidden = False
+
+            # _show_output_scrollbar 将 stretch factor 从 (0,0) 改为 (0,1)
+            # 并解锁了原文框高度约束，这可能导致 Qt 布局系统重新分配 splitter 空间，
+            # 使原文框从比例分配的高度收缩到最小高度 120px。
+            # 立即重新设置 splitter 尺寸，锁定原文框高度不变。
+            splitter_h = self._splitter.height()
+            if splitter_h > 0:
+                handle_width = self._splitter.handleWidth()
+                output_height = splitter_h - saved_input_height - handle_width
+                output_height = max(0, output_height)
+                self._splitter.setSizes([saved_input_height, output_height])
 
             # 如果用户在流式期间手动调整过窗口大小，不再自动调整高度
             # 避免翻译完成后窗口"跳动"

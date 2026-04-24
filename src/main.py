@@ -1912,6 +1912,17 @@ class MainController(QObject):
         for widget in windows_to_prerender:
             try:
                 original_pos = widget.pos()
+                # 对翻译窗口，预渲染前先设置好 splitter 状态，避免首次打开时分隔条跳动
+                if widget is self._translator_window:
+                    try:
+                        widget._splitter.setStretchFactor(0, 0)
+                        widget._splitter.setStretchFactor(1, 1)
+                        if widget._fixed_height_mode:
+                            widget._splitter.setSizes([180, 360])
+                        else:
+                            widget._splitter.setSizes([120, 180])
+                    except Exception:
+                        pass
                 widget.move(offscreen_pos)
                 widget.show()
                 QApplication.processEvents()

@@ -2948,6 +2948,11 @@ class TranslatorWindow(QWidget):
         # 重置窗口大小和高度状态
         self._reset_window_height()
 
+        # 清空输入输出框，避免显示上次文本
+        self._input_text.clear()
+        self._output_text.clear()
+        self._streaming_text = ""
+
         # 计算并移动到鼠标位置
         x, y = self._calculate_position(mouse_pos)
         self.move(x, y)

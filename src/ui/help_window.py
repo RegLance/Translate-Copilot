@@ -371,13 +371,14 @@ class HelpWindow(QWidget):
         """显示窗口并居中"""
         from PyQt6.QtWidgets import QApplication
         self.update_theme()
+        self.show()
+        # 先 show 再居中，确保 width()/height() 返回正确值
         screen = QApplication.primaryScreen()
         if screen:
             screen_geo = screen.availableGeometry()
             x = (screen_geo.width() - self.width()) // 2 + screen_geo.x()
             y = (screen_geo.height() - self.height()) // 2 + screen_geo.y()
             self.move(x, y)
-        self.show()
         self.raise_()
         self.activateWindow()
 

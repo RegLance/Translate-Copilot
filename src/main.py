@@ -1927,18 +1927,23 @@ class MainController(QObject):
         def _warmup():
             try:
                 # 预热语言检测模型
-                from .utils.language_detector import detect_language
+                try:
+                    from .utils.language_detector import detect_language
+                except ImportError:
+                    from src.utils.language_detector import detect_language
                 detect_language("Hello")
-                log_debug("语言检测预热完成")
-            except Exception:
-                pass
+                log_info("语言检测预热完成")
+            except Exception as e:
+                log_info(f"语言检测预热失败: {e}")
             try:
                 # 预热API连接（建立DNS+TCP+SSL连接，后续翻译复用）
                 if self._translator and self._translator._client:
-                    self._translator._client.models.list(limit=1, timeout=5)
-                    log_debug("API连接预热完成")
-            except Exception:
-                pass  # 预热失败不影响正常使用
+                    self._translator._client.models.list(timeout=5)
+                    log_info("API连接预热完成")
+                else:
+                    log_info("API连接预热失败: 翻译客户端未初始化")
+            except Exception as e:
+                log_info(f"API连接预热失败: {e}")
         threading.Thread(target=_warmup, daemon=True).start()
 
     def start(self):
@@ -2374,9 +2379,7 @@ class MainController(QObject):
 
         # 显示帮助窗口
         help_window = get_help_window()
-        help_window.show()
-        help_window.activateWindow()
-        help_window.raise_()
+        help_window.show_window()
 
     def _on_exit_requested(self):
         self.stop()

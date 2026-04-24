@@ -1264,6 +1264,9 @@ class HistoryWindow(QWidget):
         # 检查并更新主题
         self.update_theme()
 
+        # 重置窗口大小为预设值
+        self.resize(700, 600)
+
         from PyQt6.QtWidgets import QApplication
         screen = QApplication.primaryScreen()
         if screen:

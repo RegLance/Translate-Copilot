@@ -367,6 +367,20 @@ class HelpWindow(QWidget):
         self.closed.emit()
         event.accept()
 
+    def show_window(self):
+        """显示窗口并居中"""
+        from PyQt6.QtWidgets import QApplication
+        self.update_theme()
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geo = screen.availableGeometry()
+            x = (screen_geo.width() - self.width()) // 2 + screen_geo.x()
+            y = (screen_geo.height() - self.height()) // 2 + screen_geo.y()
+            self.move(x, y)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
     def update_theme(self):
         """更新主题"""
         new_theme = get_config().get('theme.popup_style', 'dark')

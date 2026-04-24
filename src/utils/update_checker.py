@@ -6,15 +6,9 @@ import urllib.error
 from typing import Optional
 
 try:
-    from ..config import APP_VERSION
+    from ..config import APP_VERSION, UPDATE_CHECK_URL, UPDATE_GITHUB_URL, TOOL_NAME, CHECK_TIMEOUT
 except ImportError:
-    from src.config import APP_VERSION
-
-
-UPDATE_CHECK_URL = "http://109.105.111.17:5005/update"
-UPDATE_GITHUB_URL = "https://github.com/SQAG/QTranslator/releases"
-TOOL_NAME = "QTranslator"
-CHECK_TIMEOUT = 5  # 请求超时时间（秒），避免网络不通时长时间等待
+    from src.config import APP_VERSION, UPDATE_CHECK_URL, UPDATE_GITHUB_URL, TOOL_NAME, CHECK_TIMEOUT
 
 
 def check_for_update() -> Optional[str]:

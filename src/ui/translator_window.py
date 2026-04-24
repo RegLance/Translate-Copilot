@@ -15,11 +15,11 @@ from PyQt6.QtGui import QColor, QCursor, QMouseEvent, QKeySequence, QIcon, QFont
 
 try:
     from ..utils.theme import get_theme, get_scrollbar_style, get_splitter_style, get_menu_style, get_combobox_style, get_hidden_scrollbar_style, _luminance
-    from ..config import get_config
+    from ..config import get_config, APP_VERSION, VERSION_AUTHOR
     from ..utils.tts import get_tts
 except ImportError:
     from src.utils.theme import get_theme, get_scrollbar_style, get_splitter_style, get_menu_style, get_combobox_style, get_hidden_scrollbar_style, _luminance
-    from src.config import get_config
+    from src.config import get_config, APP_VERSION, VERSION_AUTHOR
     from src.utils.tts import get_tts
 
 
@@ -1142,7 +1142,7 @@ class TranslatorWindow(QWidget):
         self._content_frame.installEventFilter(self)
 
         # 底部版本标签（绝对定位在右下角边框区域）
-        self._version_label = QLabel("v2.0.0 by Reg")
+        self._version_label = QLabel(f"Powered by {VERSION_AUTHOR} v{APP_VERSION} ")
         self._version_label.setParent(self._content_frame)
         self._version_label.setObjectName("versionLabel")
         self._version_label.setStyleSheet(f"""

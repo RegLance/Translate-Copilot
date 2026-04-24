@@ -10,14 +10,11 @@ from PyQt6.QtGui import QFont, QColor, QCursor, QDesktopServices, QMouseEvent
 import subprocess
 
 try:
-    from ..config import get_config, APP_NAME, APP_VERSION, BUILD_TIME
+    from ..config import get_config, APP_NAME, APP_VERSION, BUILD_TIME, CONTACT_URL, UPDATE_INFO_TEXT
     from ..utils.theme import get_theme, get_scrollbar_style
 except ImportError:
-    from src.config import get_config, APP_NAME, APP_VERSION, BUILD_TIME
+    from src.config import get_config, APP_NAME, APP_VERSION, BUILD_TIME, CONTACT_URL, UPDATE_INFO_TEXT
     from src.utils.theme import get_theme, get_scrollbar_style
-
-# 联系我们网址
-CONTACT_URL = "xxxx"
 
 
 class HelpWindow(QWidget):
@@ -253,8 +250,8 @@ class HelpWindow(QWidget):
 
         # 更新信息
         self._add_section(self._help_layout, "更新信息", theme)
-        self._add_text(self._help_layout, """
-暂无更新信息
+        self._add_text(self._help_layout, f"""
+{UPDATE_INFO_TEXT}
         """, theme)
 
         self._help_layout.addStretch()

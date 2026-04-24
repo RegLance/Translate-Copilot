@@ -2952,6 +2952,9 @@ class TranslatorWindow(QWidget):
         self._input_text.clear()
         self._output_text.clear()
         self._streaming_text = ""
+        # 强制立即刷新，确保清除在 show() 之前生效
+        self._input_text.repaint()
+        self._output_text.repaint()
 
         # 计算并移动到鼠标位置
         x, y = self._calculate_position(mouse_pos)

@@ -944,12 +944,9 @@ class ChatWindow(QWidget):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
         )
-        # 用时置顶、切走降级：「始终置顶」设置只控制翻译窗口
-        try:
-            from ..utils.window_front import install_activation_topmost
-        except ImportError:
-            from src.utils.window_front import install_activation_topmost
-        install_activation_topmost(self)
+        # 对话窗口是常驻交互窗口，不做强制置顶：打开/唤起时激活到前台即可，
+        # 切到其他应用后按普通窗口被正常覆盖。避免 HWND_TOPMOST 降级依赖
+        # WindowDeactivate 与前台切换的时序竞态，导致窗口「切不走」一直压在最顶。
         # Windows 手势（Win+方向键贴靠/最大化、任务栏最小化），与翻译窗口一致
         self._enable_windows_window_management()
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -1587,12 +1584,9 @@ class ChatWindow(QWidget):
         # 随后 resize 防抖再重排 → 首次进入消息区肉眼可见「调整一下」
         if self._current_session_id is None:
             self._ensure_session()
-        # 唤醒时刻短暂置前一次（「始终置顶」设置只控制翻译窗口）
-        try:
-            from ..utils.window_front import bring_to_front_once
-        except ImportError:
-            from src.utils.window_front import bring_to_front_once
-        bring_to_front_once(self)
+        # 唤起到前台：普通窗口，仅激活/抬升，不做 TOPMOST 强制置顶
+        self.raise_()
+        self.activateWindow()
 
     def show_with_text(self, text: str, skill: str = ""):
         """从划词工具栏唤起：预填选中文本，可选激活指定技能"""

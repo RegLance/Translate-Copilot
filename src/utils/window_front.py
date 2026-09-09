@@ -1,63 +1,126 @@
-"""窗口置顶策略工具。
+"""窗口前置策略工具：统一的「用时置顶、切走降级」。
 
-策略（用户定义）：
-- 「始终置顶」设置只控制翻译窗口（翻译窗口按设置持有 WindowStaysOnTopHint）
-- 其他窗口：正在使用（激活）的窗口置顶；鼠标/键盘切到其他窗口时立即降级。
-  激活状态由 WindowActivate / WindowDeactivate 事件维持，
-  不做延时释放，避免可见的"闪一下"。
+适用于所有非翻译功能窗口（设置对话框 / 历史记录 / 单词收藏 / 帮助 /
+单词弹窗 / AI 对话等）：
+
+- 唤醒/唤起（bring_to_front_once）：raise + activateWindow，再用 Win32
+  SetWindowPos(HWND_TOPMOST) 突破 Windows 前台锁定、可靠把窗口拉到最前并获取焦点。
+  随后按翻译窗口的置顶状态分两种情况：
+  · 翻译窗口未开启「始终置顶」→ 立即 SetWindowPos(HWND_NOTOPMOST) 降回普通窗口，
+    不常驻置顶；
+  · 翻译窗口开启了「始终置顶」（处于置顶带）→ 保持置顶带、不立即降级，让本窗口
+    停留在翻译窗口上方（Win32 中普通带窗口永远盖不过置顶带窗口，此时若立即降级会
+    掉到翻译窗口下方），待失焦时由下面的事件过滤器降级，翻译窗口随之自然回到顶层。
+- 失去焦点（install_activation_topmost 安装的事件过滤器）：WindowDeactivate
+  时，若窗口仍处在置顶带则降级为普通窗口；已是普通窗口则不做任何操作
+  （避免 HWND_NOTOPMOST 把它重新插到普通带顶端、反而盖住刚激活的目标窗口）。
+- 全程不设置 Qt.WindowType.WindowStaysOnTopHint。
+
+例外（不使用本模块，各自保留 WindowStaysOnTopHint）：
+- 翻译窗口：常驻置顶由 translator_window 的 always_on_top 用户设置独立控制。
+- 划词工具栏 / 自定义 Tooltip / Toast / 启动画面：均为不抢焦点或即时展示的
+  悬浮 UI（WindowDoesNotAcceptFocus / WA_ShowWithoutActivating / Tool），
+  需要盖在其他应用之上才有意义，与「获取前台焦点后降级」策略天然不适用。
 """
 import sys
 
 from PyQt6.QtCore import QEvent, QObject
 from PyQt6.QtWidgets import QWidget
 
+# Win32 常量
+_HWND_TOPMOST = -1
+_HWND_NOTOPMOST = -2
+_SWP_NOSIZE = 0x0001
+_SWP_NOMOVE = 0x0002
+_SWP_NOACTIVATE = 0x0010
+_GWL_EXSTYLE = -20
+_WS_EX_TOPMOST = 0x00000008
+
+
+def _user32():
+    """取 user32 并声明原型：64 位下句柄必须按指针宽度传递，否则被截断成
+    32 位会导致 SetWindowPos / GetWindowLongW 静默失效。"""
+    import ctypes
+    u = ctypes.windll.user32
+    u.SetWindowPos.argtypes = [
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+    u.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    u.GetWindowLongW.restype = ctypes.c_long
+    return u
+
 
 def _set_topmost(widget: QWidget, on: bool) -> None:
-    """Win32 下切换窗口置顶状态；非 Windows 平台为空操作。
-
-    降级（on=False）时插到「当前前台窗口」（刚被点击的窗口）之下，
-    效果等同普通窗口：降级窗口被点中的目标窗口挡住，而不是钉在
-    非置顶带顶端继续盖住别人。
-    """
+    """Win32 下切换窗口置顶状态；非 Windows 平台为空操作。"""
     if sys.platform != "win32":
         return
     try:
-        import ctypes
-        user32 = ctypes.windll.user32
-        # 必须声明 argtypes：否则 64 位句柄按 32 位截断，SetWindowPos 静默失效
-        user32.SetWindowPos.argtypes = [
-            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
-            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        u = _user32()
         hwnd = int(widget.winId())
-        SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE = 0x0002, 0x0001, 0x0010
-        if on:
-            insert_after = -1  # HWND_TOPMOST
-        else:
-            # 必须声明 restype：否则 64 位句柄被截成 int，
-            # 比较与插入位置都会出错
-            user32.GetForegroundWindow.restype = ctypes.c_void_p
-            fg = user32.GetForegroundWindow()
-            insert_after = fg if (fg and fg != hwnd) else -2
-        user32.SetWindowPos(hwnd, insert_after, 0, 0, 0, 0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+        insert_after = _HWND_TOPMOST if on else _HWND_NOTOPMOST
+        u.SetWindowPos(hwnd, insert_after, 0, 0, 0, 0,
+                       _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
     except Exception:
         pass
 
 
+def _is_topmost(widget: QWidget) -> bool:
+    """窗口当前是否处于置顶带（扩展样式含 WS_EX_TOPMOST）；非 Windows 返回 False。"""
+    if sys.platform != "win32":
+        return False
+    try:
+        u = _user32()
+        hwnd = int(widget.winId())
+        return bool(u.GetWindowLongW(hwnd, _GWL_EXSTYLE) & _WS_EX_TOPMOST)
+    except Exception:
+        return False
+
+
+def _demote_if_topmost(widget: QWidget) -> None:
+    """仅当窗口仍在置顶带时才降级为普通窗口。
+
+    已是普通窗口则不做任何 SetWindowPos：否则 HWND_NOTOPMOST 会把它重新插到
+    普通带顶端，反而盖住刚被点击激活的目标窗口（正是"切不走"的时序竞态根源）。
+    """
+    if _is_topmost(widget):
+        _set_topmost(widget, False)
+
+
+def _translator_always_on_top() -> bool:
+    """翻译窗口是否开启了「始终置顶」（处于 Win32 置顶带）。
+
+    开启时，被唤醒的功能窗口必须保持置顶带才能停留在翻译窗口上方——普通带窗口
+    永远盖不过置顶带窗口。读取用户配置 translator_window.always_on_top
+    （translator_window 依此决定是否加 WindowStaysOnTopHint）；读取失败按未开启
+    处理，退回「立即降级」的保守行为。
+    """
+    try:
+        from ..config import get_config
+    except ImportError:
+        from src.config import get_config
+    try:
+        return bool(get_config().get('translator_window.always_on_top', False))
+    except Exception:
+        return False
+
+
 class _ActivationTopMostFilter(QObject):
-    """激活时置顶、失活时降级"""
+    """失焦即降级：窗口失去激活时确保退出置顶带，允许被其他正常窗口覆盖。
+
+    激活时不做常驻置顶——唤起时的置顶由 bring_to_front_once 负责。当翻译窗口
+    常驻置顶时，被唤醒窗口会保持置顶带以停留在其上方，正是靠本过滤器在失焦时把它
+    降级、让翻译窗口自然回到顶层。（旧实现在 WindowActivate 时设为常驻 TOPMOST，
+    会让窗口一直盖住别人、切不走；此处只保留失活降级，从根上消除该问题。）
+    """
 
     def eventFilter(self, obj, event):
-        et = event.type()
-        if et == QEvent.Type.WindowActivate:
-            _set_topmost(obj, True)
-        elif et == QEvent.Type.WindowDeactivate:
-            _set_topmost(obj, False)
+        if event.type() == QEvent.Type.WindowDeactivate:
+            _demote_if_topmost(obj)
         return super().eventFilter(obj, event)
 
 
 def install_activation_topmost(widget: QWidget) -> None:
-    """让窗口"用时置顶、切走降级"。重复调用安全（只安装一次）。"""
+    """安装「失焦降级」过滤器，让窗口切走后不常驻置顶。重复调用安全（只装一次）。"""
     if getattr(widget, "_activation_topmost_filter", None) is not None:
         return
     f = _ActivationTopMostFilter(widget)
@@ -66,11 +129,18 @@ def install_activation_topmost(widget: QWidget) -> None:
 
 
 def bring_to_front_once(widget: QWidget) -> None:
-    """唤醒窗口到最前：raise/激活 + 立即置顶。
+    """唤醒窗口到前台：raise/激活 + Win32 置顶抢前台，按翻译窗口置顶状态决定是否立即降级。
 
-    置顶状态由 install_activation_topmost 的激活/失活事件持续维持，
-    这里不做延时释放（避免可见的"闪一下"）。
+    HWND_TOPMOST 用于突破 Windows 前台锁定、可靠获取前台焦点，并能临时盖过处于
+    置顶带的窗口。随后：
+    - 翻译窗口未「始终置顶」→ 立即切回 HWND_NOTOPMOST 成为普通窗口（不常驻置顶），
+      切到其他应用时可被正常覆盖；
+    - 翻译窗口「始终置顶」→ 保持置顶带、不立即降级，让本窗口停留在翻译窗口上方
+      （普通带窗口永远盖不过置顶带窗口，此时立即降级会掉到翻译窗口下方）；待本窗口
+      失焦时由 install_activation_topmost 的过滤器降级，翻译窗口随之自然回到顶层。
     """
     widget.raise_()
     widget.activateWindow()
-    _set_topmost(widget, True)
+    _set_topmost(widget, True)   # 抢前台：强制拉到最前（含盖过常驻置顶的翻译窗口）
+    if not _translator_always_on_top():
+        _set_topmost(widget, False)  # 无置顶冲突：立即降级为普通窗口，不常驻置顶

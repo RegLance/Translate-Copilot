@@ -1,0 +1,60 @@
+# ============================================================
+# QTranslator .gitignore
+# 技术栈：Python (PyQt6) + PyInstaller 打包 + Node.js 原生选区服务
+# ============================================================
+
+# ---------- Python 缓存与编译产物 ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ---------- 打包 / 分发 ----------
+# PyInstaller 输出目录；注意 *.spec 是手写构建脚本（源文件），需保留、勿忽略
+build/
+dist/
+downloads/
+*.egg-info/
+.eggs/
+
+# ---------- 虚拟环境 ----------
+.venv/
+venv/
+env/
+ENV/
+
+# ---------- 测试 / 覆盖率 / 类型检查缓存 ----------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# ---------- Node.js 原生选区服务（native/）----------
+# npm 依赖与日志
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+# 嵌入式 Node 运行时：由 scripts/prepare_node_runtime.py 下载生成，非源码
+# 注意：native/package/ 是内置的 selection-hook 源码与预编译产物
+#（含 prebuilds/*.node、src/{linux,mac,windows}/lib/），需保留在版本控制中。
+# 因此本文件刻意不忽略 lib/、*.node，以免误伤这些内置源码与二进制。
+
+# ---------- 应用运行时数据 ----------
+# 正常运行时数据位于 %LOCALAPPDATA%\QTranslator（项目外）；
+# 以下兼容旧版本可能在项目内生成的本地配置与日志，避免误提交个人数据
+config.yaml
+logs/
+*.log
+
+# ---------- IDE / 编辑器 ----------
+.idea/
+.vscode/
+*.swp
+
+# ---------- 操作系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini

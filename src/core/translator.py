@@ -47,6 +47,90 @@ def _log_crash_safe(message: str, exc: Exception = None):
         pass  # 避免日志写入失败导致程序崩溃
 
 
+class _ThinkStripper:
+    """流式剥离正文中内嵌的 <think>...</think> 思考标签。
+
+    主流思考模型的思考分两种透出方式：
+    - 独立字段：DeepSeek / Qwen / GLM 等把思考放在 reasoning_content
+      （MiniMax 开启 reasoning_split 后还含 reasoning_details），与正文
+      content 分离——调用方只读 content、不读思考字段即可天然隔离。
+    - 内嵌标签：MiniMax 等默认把思考以 <think>...</think> 混在 content
+      里返回，不剥离就会连同思考一起当成译文输出。本类专门处理这种。
+
+    标签可能跨 chunk 分裂（如 '<th' + 'ink>'），尾部疑似残缺标签先扣在缓冲，
+    等下一块拼齐再判定。feed() 喂入正文片段、返回可安全输出的译文；流结束时
+    flush() 冲刷，未闭合的 <think> 段视为思考整体丢弃。
+    """
+
+    _OPEN = '<think>'
+    _CLOSE = '</think>'
+
+    def __init__(self):
+        self._state = 'normal'  # normal=正文 / think=思考（吞掉不输出）
+        self._buf = ""
+
+    @staticmethod
+    def _partial_suffix_len(buf: str, tag: str) -> int:
+        """buf 尾部与 tag 前缀重叠的长度（buf 以 '<thi' 结尾对 '<think>' 返回 4）"""
+        low = buf.lower()
+        for k in range(min(len(tag) - 1, len(low)), 0, -1):
+            if low.endswith(tag[:k]):
+                return k
+        return 0
+
+    def feed(self, text: str) -> str:
+        """喂入一段正文，返回其中可安全输出的译文（已剔除思考标签及其内容）"""
+        if not text:
+            return ""
+        self._buf += text
+        out = []
+        while True:
+            low = self._buf.lower()
+            if self._state == 'normal':
+                idx = low.find(self._OPEN)
+                if idx >= 0:
+                    if idx:
+                        out.append(self._buf[:idx])   # 开标签前的正文照常输出
+                    self._buf = self._buf[idx + len(self._OPEN):]
+                    self._state = 'think'
+                    continue
+                # 尾部可能是被切断的开标签，扣住等下一块，其余输出
+                hold = self._partial_suffix_len(self._buf, self._OPEN)
+                if hold:
+                    out.append(self._buf[:-hold])
+                    self._buf = self._buf[-hold:]
+                else:
+                    out.append(self._buf)
+                    self._buf = ""
+                break
+            else:  # think：吞掉内容直到遇见闭标签
+                idx = low.find(self._CLOSE)
+                if idx >= 0:
+                    self._buf = self._buf[idx + len(self._CLOSE):]
+                    self._state = 'normal'
+                    continue
+                # 尾部可能是被切断的闭标签，扣住；其余思考内容丢弃
+                hold = self._partial_suffix_len(self._buf, self._CLOSE)
+                self._buf = self._buf[-hold:] if hold else ""
+                break
+        return "".join(out)
+
+    def flush(self) -> str:
+        """流结束冲刷：normal 态残留缓冲按正文补出，think 态残留（未闭合）丢弃"""
+        out = self._buf if (self._state == 'normal' and self._buf) else ""
+        self._buf = ""
+        self._state = 'normal'
+        return out
+
+
+def strip_think_tags(text: str) -> str:
+    """一次性剥离文本中内嵌的 <think>...</think> 思考标签（非流式场景用）"""
+    if not text or '<think>' not in text.lower():
+        return text
+    s = _ThinkStripper()
+    return s.feed(text) + s.flush()
+
+
 @dataclass
 class TranslationResult:
     """翻译结果"""
@@ -185,23 +269,48 @@ class Translator:
                 stream=True,
             )
 
+            stripper = _ThinkStripper()
             full_text = ""
             _leading_stripped = False
+
+            def _emit(raw: str) -> str:
+                """剥离思考后的正文：在首个可见字符出现前剥离前导空白
+                （部分模型输出以空行/空白开头，会让译文框顶部出现空行，
+                正文内部的段落空行不受影响），随后累加并回调，
+                返回本次应 yield 的片段（空串表示无需输出）。"""
+                nonlocal full_text, _leading_stripped
+                if not raw:
+                    return ""
+                if not _leading_stripped:
+                    raw = raw.lstrip()
+                    if not raw:
+                        return ""
+                    _leading_stripped = True
+                full_text += raw
+                if on_chunk:
+                    on_chunk(raw)
+                return raw
+
             for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    if not _leading_stripped:
-                        # 部分模型输出以空行/空白开头，会导致译文框顶部
-                        # 出现空行；在首个可见字符出现前剥离前导空白，
-                        # 正文内部的段落空行不受影响
-                        content = content.lstrip()
-                        if not content:
-                            continue
-                        _leading_stripped = True
-                    full_text += content
-                    if on_chunk:
-                        on_chunk(content)
-                    yield content
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                # 标准思考模型（DeepSeek / Qwen / GLM 等）的思考走独立的
+                # reasoning_content / reasoning_details 字段，翻译场景无需展示：
+                # 这里只取正文 content、不读思考字段即可天然隔离。
+                content = getattr(delta, 'content', None)
+                if not content:
+                    continue
+                # MiniMax 等模型把 <think>...</think> 思考内嵌在 content 里，
+                # 流式剥离丢弃，避免思考被当成译文输出
+                piece = _emit(stripper.feed(content))
+                if piece:
+                    yield piece
+
+            # 流结束：冲刷剥离器残留（未闭合的 <think> 段按思考整体丢弃）
+            tail = _emit(stripper.flush())
+            if tail:
+                yield tail
 
             return full_text
 
@@ -540,7 +649,10 @@ Examples:
                 temperature=0,
             )
 
-            translated_text = response.choices[0].message.content.strip()
+            raw = response.choices[0].message.content or ""
+            # 同流式路径：剥离 MiniMax 等内嵌 <think> 思考；
+            # reasoning_content 字段不读即隔离（DeepSeek/Qwen/GLM 等）
+            translated_text = strip_think_tags(raw).strip()
 
             result = TranslationResult(
                 original_text=text,

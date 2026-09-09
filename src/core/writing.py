@@ -25,11 +25,13 @@ try:
     from ..config import get_config
     from ..utils.logger import log_info, log_error, log_debug, log_warning
     from ..utils.language_detector import detect_language, is_chinese_text, get_translation_direction
+    from .translator import _ThinkStripper  # 复用翻译器的思考标签剥离（MiniMax 等内嵌 <think>）
 except ImportError:
     # 打包后或直接运行时的导入路径
     from src.config import get_config
     from src.utils.logger import log_info, log_error, log_debug, log_warning
     from src.utils.language_detector import detect_language, is_chinese_text, get_translation_direction
+    from src.core.translator import _ThinkStripper
 
 
 def _log_keyboard_state(prefix: str = ""):
@@ -182,15 +184,31 @@ class WritingService:
                 stream=True,
             )
 
+            # 思考模型：DeepSeek/Qwen/GLM 思考走 reasoning_content 字段（只读
+            # content 即天然隔离）；MiniMax 等把 <think>...</think> 内嵌在 content，
+            # 流式剥离丢弃，避免思考被当成写作正文输出
+            stripper = _ThinkStripper()
             for chunk in stream:
                 if self._stop_flag:
                     break
 
-                if chunk.choices and chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
+                if not chunk.choices:
+                    continue
+                content = getattr(chunk.choices[0].delta, 'content', None)
+                if not content:
+                    continue
+                body = stripper.feed(content)
+                if body:
                     if on_chunk:
-                        on_chunk(content)
-                    yield content
+                        on_chunk(body)
+                    yield body
+
+            # 流结束冲刷剥离器残留（未闭合的 <think> 段按思考整体丢弃）
+            tail = stripper.flush()
+            if tail:
+                if on_chunk:
+                    on_chunk(tail)
+                yield tail
 
         except Exception as e:
             error_msg = str(e)
